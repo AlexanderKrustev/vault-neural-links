@@ -1,0 +1,9 @@
+{
+  "id": "vault-neural-links",
+  "name": "Vault Neural Links",
+  "version": "0.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Weighted-link force-directed graph, built on top of a Hebbian-style usage layer.",
+  "author": "Alex Krustev",
+  "isDesktopOnly": false
+}

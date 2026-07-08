@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+
+# runtime data (per spec: single source of truth is a generated file, not checked in)
+data/events/*.jsonl
+data/link-weights.json

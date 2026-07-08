@@ -1,0 +1,20 @@
+{
+  "name": "vault-neural-links-plugin",
+  "version": "0.0.0",
+  "description": "Weighted-link neural graph visualization for Obsidian",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production"
+  },
+  "dependencies": {
+    "@vault-neural-links/core": "*",
+    "d3-force": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/d3-force": "^3.0.0",
+    "esbuild": "^0.23.0",
+    "obsidian": "latest",
+    "typescript": "^5.5.0"
+  }
+}
