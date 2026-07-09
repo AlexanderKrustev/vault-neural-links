@@ -1,0 +1,47 @@
+.vault-neural-links-view {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.vault-neural-links-view canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.vault-neural-links-zoom-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vault-neural-links-zoom-controls button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.vault-neural-links-zoom-controls button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.vault-neural-links-tooltip {
+  position: fixed;
+  z-index: 100;
+  padding: 6px 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: pre;
+  pointer-events: none;
+}
