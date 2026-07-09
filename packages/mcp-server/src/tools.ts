@@ -3,7 +3,6 @@ import {
   appendChangelogEntry,
   appendUnderHeading,
   autoLinkScan,
-  commitVaultChanges,
   getEdgeWeight,
   getWeightedNeighbors,
   initInstance,
@@ -129,11 +128,11 @@ async function writeAndSync(
   body: string,
   action: "create" | "update",
 ) {
-  // Templates/ are placeholders, not real notes — skip auto-link/changelog/
-  // commit for them, same exclusion the replaced PowerShell hook applied.
+  // Templates/ are placeholders, not real notes — skip auto-link/changelog
+  // for them, same exclusion the replaced PowerShell hook applied.
   if (isTemplatePath(notePath)) {
     await writeNote(ctx.vaultPath, notePath, { frontmatter, body });
-    return { path: notePath, autoLinked: [], committed: false };
+    return { path: notePath, autoLinked: [] };
   }
 
   // Auto-link scan only ever touches the body (it inserts/reads the
@@ -148,12 +147,7 @@ async function writeAndSync(
     reason: "Written via vault-neural-link MCP.",
   });
 
-  const commit = await commitVaultChanges(
-    ctx.vaultPath,
-    `auto: ${action} ${notePath}.md (${new Date().toISOString()})`,
-  );
-
-  return { path: notePath, autoLinked: linked.added, committed: commit.committed };
+  return { path: notePath, autoLinked: linked.added };
 }
 
 export const createNoteTool = {
@@ -162,9 +156,8 @@ export const createNoteTool = {
     title: "Create note",
     description:
       "Creates a new note in the vault with the given frontmatter and body, then automatically " +
-      "runs the auto-link scan, appends a changes.jsonl entry, and commits the change to git — " +
-      "the same pipeline the vault's PostToolUse hook runs, done natively so it works from any " +
-      "MCP client without relying on that hook. Fails if a note already exists at this path " +
+      "runs the auto-link scan and appends a changes.jsonl entry — no separate hook or hand-rolled " +
+      "script needed, this works from any MCP client. Fails if a note already exists at this path " +
       "(use update_note instead).",
     inputSchema: {
       path: z.string().describe("Vault-relative note path, without .md extension"),
@@ -191,7 +184,7 @@ export const updateNoteTool = {
     description:
       "Updates an existing note — either replacing its body outright, or appending text under a " +
       "heading (creating the heading if absent), matching this vault's '## Updates' / '## Related' " +
-      "append-only convention. Then runs the same auto-link/changelog/commit pipeline as create_note.",
+      "append-only convention. Then runs the same auto-link/changelog pipeline as create_note.",
     inputSchema: {
       path: z.string().describe("Vault-relative note path, without .md extension"),
       body: z.string().optional().describe("Replacement body. Omit if using appendUnderHeading."),

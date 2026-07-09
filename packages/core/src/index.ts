@@ -16,7 +16,6 @@ export * from "./frontmatter.js";
 export * from "./notes.js";
 export * from "./autolink.js";
 export * from "./changelog.js";
-export * from "./gitSync.js";
 
 const DEFAULT_REINFORCE_BOOST = 5;
 

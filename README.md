@@ -33,8 +33,9 @@ now, not just what's technically connected.
   edge weight up; unused edges decay over time (30-day half-life by
   default). `get_weighted_neighbors` ranks by this weight, not just link
   count.
-- **Git-backed history** — every write is committed automatically, with a
-  human-readable `changes.jsonl` changelog alongside your normal git log.
+- **Plain-text audit trail** — every write appends a human-readable line to
+  `changes.jsonl`. No git dependency — your vault doesn't need to be a git
+  repo for any of this to work.
 - **Zero lock-in** — runtime data lives inside your vault
   (`.vault-neural-links/`), not in some external database. Delete the
   folder and you're back to a plain Obsidian vault.
@@ -66,7 +67,7 @@ vault, and it will use these tools automatically.
 
 | Tool | Purpose |
 |---|---|
-| `create_note` | Create a note (frontmatter + body); auto-links, changelogs, and commits it |
+| `create_note` | Create a note (frontmatter + body); auto-links it and logs the change |
 | `update_note` | Replace a note's body, or append text under a heading (e.g. `## Updates`) |
 | `read_note` | Read a note's parsed frontmatter and body |
 | `list_notes` | List note paths, optionally scoped to a folder |
@@ -80,8 +81,8 @@ vault, and it will use these tools automatically.
 ## Packages
 
 - **`packages/core`** — headless engine: note I/O, auto-linking, the
-  weighted-link event log, decay/compaction logic, and git sync. No MCP
-  framing; usable standalone.
+  weighted-link event log, and decay/compaction logic. No MCP framing,
+  no git dependency; usable standalone.
 - **`packages/mcp-server`** (`@vault-neural-links/mcp-server`) — the MCP
   server described above. This is the installable product.
 - **`packages/obsidian-plugin`** — an in-progress Obsidian plugin that

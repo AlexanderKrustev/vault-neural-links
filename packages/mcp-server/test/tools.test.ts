@@ -78,7 +78,7 @@ describe("mcp-server tools", () => {
     expect(neighbors).toHaveLength(1);
   });
 
-  it("create_note writes a note and reports autoLinked/committed, then errors on a duplicate create", async () => {
+  it("create_note writes a note and reports autoLinked, then errors on a duplicate create", async () => {
     const result = parseResult(
       await createNoteTool.handler(ctx)({
         path: "Foo",
@@ -89,7 +89,6 @@ describe("mcp-server tools", () => {
     expect(result.created).toBe(true);
     expect(result.path).toBe("Foo");
     expect(Array.isArray(result.autoLinked)).toBe(true);
-    expect(typeof result.committed).toBe("boolean");
 
     const readBack = parseResult(await readNoteTool.handler(ctx)({ path: "Foo" }));
     expect(readBack.frontmatter).toEqual({ type: "atomic" });
@@ -162,12 +161,11 @@ describe("mcp-server tools", () => {
     expect(hits.map((h: { path: string }) => h.path)).toEqual(["Apple Device Tips"]);
   });
 
-  it("create_note skips auto-link/changelog/commit for notes under Templates/", async () => {
+  it("create_note skips auto-link/changelog for notes under Templates/", async () => {
     const result = parseResult(
       await createNoteTool.handler(ctx)({ path: "Templates/Meeting", frontmatter: {}, body: "Agenda" }),
     );
     expect(result.autoLinked).toEqual([]);
-    expect(result.committed).toBe(false);
 
     const readBack = parseResult(await readNoteTool.handler(ctx)({ path: "Templates/Meeting" }));
     expect(readBack.body.trim()).toBe("Agenda");
