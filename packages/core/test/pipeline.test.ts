@@ -85,4 +85,23 @@ describe("logger + compactor + query pipeline", () => {
     expect(weight).toBeLessThan(10);
     expect(weight).toBeCloseTo(5, 0);
   });
+
+  it("preserves edges from a prior compaction when a later compaction only touches unrelated edges", async () => {
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 1 }));
+    await compact(dataDir);
+
+    const weightAfterFirst = await getEdgeWeight(dataDir, "A", "B");
+    expect(weightAfterFirst).toBeCloseTo(1, 5);
+
+    await appendEvent(dataDir, "inst-1", event({ from: "X", to: "Y", weight_delta: 1 }));
+    const result = await compact(dataDir);
+
+    expect(result.edgeCount).toBe(2);
+    const weightAfterSecond = await getEdgeWeight(dataDir, "A", "B");
+    expect(weightAfterSecond).not.toBeNull();
+    expect(weightAfterSecond).toBeCloseTo(1, 5);
+
+    const newWeight = await getEdgeWeight(dataDir, "X", "Y");
+    expect(newWeight).toBeCloseTo(1, 5);
+  });
 });
