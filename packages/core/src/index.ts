@@ -12,6 +12,11 @@ export { appendEvent } from "./logger.js";
 export { compact } from "./compactor.js";
 export { getWeightedNeighbors, getEdgeWeight } from "./query.js";
 export { resolveDataDir } from "./vaultPaths.js";
+export * from "./frontmatter.js";
+export * from "./notes.js";
+export * from "./autolink.js";
+export * from "./changelog.js";
+export * from "./gitSync.js";
 
 const DEFAULT_REINFORCE_BOOST = 5;
 
