@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { LinkWeightsFile, WeightedNeighbor } from "./types.js";
+import type { EdgeRecord, LinkWeightsFile, NoteTypeDecayConfig, WeightedNeighbor } from "./types.js";
+import { decayWeight, resolveHalfLifeDays } from "./decay.js";
+import { parseFrontmatter } from "./frontmatter.js";
 
 async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null> {
   try {
@@ -12,6 +14,41 @@ async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null
   }
 }
 
+
+async function readNoteType(vaultPath: string, notePath: string): Promise<string | undefined> {
+  try {
+    const raw = await readFile(join(vaultPath, `${notePath}.md`), "utf8");
+    const { frontmatter } = parseFrontmatter(raw);
+    return typeof frontmatter.type === "string" ? frontmatter.type : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function daysSince(iso: string, now: Date): number {
+  return (now.getTime() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24);
+}
+
+/**
+ * Applies exponential decay to an edge's baseStrength live, based on time
+ * elapsed since it was last touched — replaces the old approach of decaying
+ * forward at each compaction. `notePath` is the neighboring note whose
+ * frontmatter `type` determines the decay tau (structural notes decay
+ * slower than situational ones); vaultPath is optional so callers without
+ * filesystem access to the vault still get the default tau.
+ */
+async function liveWeight(
+  vaultPath: string | undefined,
+  notePath: string,
+  record: EdgeRecord,
+  now: Date,
+  decayConfig?: NoteTypeDecayConfig,
+): Promise<number> {
+  const noteType = vaultPath ? await readNoteType(vaultPath, notePath) : undefined;
+  const halfLifeDays = resolveHalfLifeDays(noteType, decayConfig);
+  return decayWeight(record.baseStrength, daysSince(record.lastTouched, now), { halfLifeDays });
+}
+
 /**
  * Reads link-weights.json and returns top-K neighbors for a note,
  * sorted by weight descending.
@@ -20,16 +57,19 @@ export async function getWeightedNeighbors(
   vaultDataDir: string,
   note: string,
   topK = 10,
+  vaultPath?: string,
 ): Promise<WeightedNeighbor[]> {
   const weights = await loadWeights(vaultDataDir);
   if (!weights) return [];
 
+  const now = new Date();
   const neighbors: WeightedNeighbor[] = [];
   for (const [key, record] of Object.entries(weights.edges)) {
     const [a, b] = key.split("|");
     const other = a === note ? b : b === note ? a : undefined;
     if (other === undefined) continue;
-    neighbors.push({ path: other, weight: record.weight, lastTouched: record.lastTouched });
+    const weight = await liveWeight(vaultPath, other, record, now);
+    neighbors.push({ path: other, weight, lastTouched: record.lastTouched });
   }
 
   neighbors.sort((x, y) => y.weight - x.weight);
@@ -40,9 +80,12 @@ export async function getEdgeWeight(
   vaultDataDir: string,
   noteA: string,
   noteB: string,
+  vaultPath?: string,
 ): Promise<number | undefined> {
   const weights = await loadWeights(vaultDataDir);
   if (!weights) return undefined;
   const key = [noteA, noteB].sort().join("|");
-  return weights.edges[key]?.weight;
+  const record = weights.edges[key];
+  if (!record) return undefined;
+  return liveWeight(vaultPath, noteB, record, new Date());
 }

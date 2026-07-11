@@ -10,7 +10,8 @@ export interface EventLogEntry {
 }
 
 export interface EdgeRecord {
-  weight: number;
+  /** Raw accumulated weight from events, undecayed — decay is applied live at query time. */
+  baseStrength: number;
   lastTouched: string;
   traverseCount: number;
   reinforceCount: number;
@@ -40,4 +41,24 @@ export interface DecayConfig {
 
 export const DEFAULT_DECAY_CONFIG: DecayConfig = {
   halfLifeDays: 30,
+};
+
+
+/**
+ * Per-note-type decay tau (half-life), keyed by frontmatter `type`. Lets
+ * situational/client notes fade fast while structural/reference notes stay
+ * visible longer, instead of one global half-life for every note.
+ */
+export interface NoteTypeDecayConfig {
+  defaultHalfLifeDays: number;
+  byType: Record<string, number>;
+}
+
+export const DEFAULT_NOTE_TYPE_DECAY_CONFIG: NoteTypeDecayConfig = {
+  defaultHalfLifeDays: 30,
+  byType: {
+    moc: 90,
+    atomic: 30,
+    project: 14,
+  },
 };

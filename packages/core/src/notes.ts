@@ -185,7 +185,7 @@ export async function searchNotes(
     // independent.
     await Promise.all(
       hits.map(async (hit) => {
-        const neighbors = await getWeightedNeighbors(vaultDataDir, hit.path, 1);
+        const neighbors = await getWeightedNeighbors(vaultDataDir, hit.path, 1, vaultPath);
         hit.weight = neighbors[0]?.weight;
       }),
     );

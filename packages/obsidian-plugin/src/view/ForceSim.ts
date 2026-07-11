@@ -9,6 +9,23 @@ import {
 } from "d3-force";
 import type { LinkWeightsFile } from "@vault-neural-links/core";
 
+// baseStrength is undecayed — decay is applied live here rather than at
+// compaction (see packages/core/src/query.ts for the same formula, used by
+// MCP-driven queries). Inlined rather than importing @vault-neural-links/core's
+// runtime code, since that package's index bundles Node-only fs/path/crypto
+// modules that can't resolve in this browser-bundled plugin; only its types
+// are safe to import here. The plugin has no synchronous access to each
+// note's frontmatter type, so it applies the global default half-life
+// instead of per-note-type tau.
+const DEFAULT_HALF_LIFE_DAYS = 30;
+
+function liveWeight(baseStrength: number, lastTouched: string): number {
+  const daysSince = (Date.now() - new Date(lastTouched).getTime()) / (1000 * 60 * 60 * 24);
+  if (daysSince <= 0) return baseStrength;
+  const lambda = Math.LN2 / DEFAULT_HALF_LIFE_DAYS;
+  return baseStrength * Math.exp(-lambda * daysSince);
+}
+
 export interface SimNode {
   id: string;
   x?: number;
@@ -159,7 +176,8 @@ export class ForceSim {
     const ids = new Set(notePaths);
     const neuralEdges: SimEdge[] = [];
     for (const [key, record] of Object.entries(weights.edges)) {
-      if (record.weight < minWeight) continue;
+      const weight = liveWeight(record.baseStrength, record.lastTouched);
+      if (weight < minWeight) continue;
       const [source, target] = key.split("|");
       if (source === undefined || target === undefined) continue;
       // edge endpoints may not match a known note path (e.g. traversal events
@@ -167,7 +185,7 @@ export class ForceSim {
       // forceLink never references a missing id.
       ids.add(source);
       ids.add(target);
-      neuralEdges.push({ source, target, kind: "neural", weight: record.weight, lastTouched: record.lastTouched });
+      neuralEdges.push({ source, target, kind: "neural", weight, lastTouched: record.lastTouched });
     }
 
     const nativeSimEdges: SimEdge[] = [];

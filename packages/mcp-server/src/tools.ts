@@ -39,7 +39,7 @@ export const getWeightedNeighborsTool = {
     },
   },
   handler: (ctx: ToolContext) => async ({ note, topK }: { note: string; topK?: number }) => {
-    const neighbors = await getWeightedNeighbors(ctx.vaultDataDir, note, topK);
+    const neighbors = await getWeightedNeighbors(ctx.vaultDataDir, note, topK, ctx.vaultPath);
     return textResult(neighbors);
   },
 };
@@ -55,7 +55,7 @@ export const getEdgeWeightTool = {
     },
   },
   handler: (ctx: ToolContext) => async ({ noteA, noteB }: { noteA: string; noteB: string }) => {
-    const weight = await getEdgeWeight(ctx.vaultDataDir, noteA, noteB);
+    const weight = await getEdgeWeight(ctx.vaultDataDir, noteA, noteB, ctx.vaultPath);
     return textResult({ noteA, noteB, weight: weight ?? null });
   },
 };

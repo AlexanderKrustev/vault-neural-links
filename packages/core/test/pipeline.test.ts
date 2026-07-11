@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "../src/logger.js";
@@ -103,5 +103,68 @@ describe("logger + compactor + query pipeline", () => {
 
     const newWeight = await getEdgeWeight(dataDir, "X", "Y");
     expect(newWeight).toBeCloseTo(1, 5);
+  });
+});
+
+
+describe("legacy weight field migration", () => {
+  let dataDir: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-legacy-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("migrates a pre-rename edge (field `weight`) to `baseStrength` even with no new events touching it", async () => {
+    const legacyFile = {
+      version: 1,
+      compactedAt: new Date().toISOString(),
+      edges: {
+        "A|B": { weight: 7, lastTouched: new Date().toISOString(), traverseCount: 1, reinforceCount: 0 },
+      },
+    };
+    await writeFile(join(dataDir, "link-weights.json"), JSON.stringify(legacyFile), "utf8");
+
+    await compact(dataDir);
+
+    const weight = await getEdgeWeight(dataDir, "A", "B");
+    expect(weight).toBeCloseTo(7, 5);
+
+    const raw = JSON.parse(await readFile(join(dataDir, "link-weights.json"), "utf8"));
+    expect(raw.edges["A|B"].baseStrength).toBeCloseTo(7, 5);
+    expect(raw.edges["A|B"].weight).toBeUndefined();
+  });
+});
+
+
+describe("per-note-type decay tau at query time", () => {
+  let dataDir: string;
+  let vaultPath: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-data-"));
+    vaultPath = await mkdtemp(join(tmpdir(), "vnl-test-vault-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(vaultPath, { recursive: true, force: true });
+  });
+
+  it("decays a moc-type neighbor slower than the global default half-life", async () => {
+    await writeFile(join(vaultPath, "Hub.md"), "---\ntype: moc\n---\nbody", "utf8");
+
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "Hub", ts: old, weight_delta: 10 }));
+    await compact(dataDir);
+
+    const withoutType = await getEdgeWeight(dataDir, "A", "Hub");
+    const withType = await getEdgeWeight(dataDir, "A", "Hub", vaultPath);
+
+    expect(withoutType).toBeCloseTo(5, 0); // default 30-day half-life: one half-life elapsed
+    expect(withType).toBeGreaterThan(withoutType!); // moc tau (90d) decays slower over the same 30 days
   });
 });

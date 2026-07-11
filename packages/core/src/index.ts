@@ -53,7 +53,7 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     },
 
     async getWeightedNeighbors(note: string, topK = 10) {
-      return getWeightedNeighbors(vaultDataDir, note, topK);
+      return getWeightedNeighbors(vaultDataDir, note, topK, vaultPath);
     },
 
     async compact() {

@@ -2,7 +2,6 @@ import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/pro
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CompactionResult, EdgeRecord, EventLogEntry, LinkWeightsFile } from "./types.js";
-import { decayWeight } from "./decay.js";
 
 const WEIGHTS_FILE_VERSION = 1;
 
@@ -62,28 +61,34 @@ export async function compact(vaultDataDir: string): Promise<CompactionResult> {
 
   const existing = await readExistingWeights(weightsFilePath);
   if (existing) {
-    const prevCompactedAt = new Date(existing.compactedAt);
-    const daysSincePrevCompaction =
-      (compactedAt.getTime() - prevCompactedAt.getTime()) / (1000 * 60 * 60 * 24);
     for (const [key, record] of Object.entries(existing.edges)) {
+      // Migrate pre-existing files written before the weight -> baseStrength
+      // rename: an edge untouched by any event since the rename would
+      // otherwise keep its old `weight` field forever, and every reader now
+      // expects `baseStrength`.
+      const legacy = record as unknown as { weight?: number; baseStrength?: number };
       edges.set(key, {
-        ...record,
-        weight: decayWeight(record.weight, daysSincePrevCompaction),
+        baseStrength: legacy.baseStrength ?? legacy.weight ?? 0,
+        lastTouched: record.lastTouched,
+        traverseCount: record.traverseCount,
+        reinforceCount: record.reinforceCount,
       });
     }
   }
 
-  const touchedKeys = new Set<string>();
+  // Decay is no longer applied here — compaction only folds raw event deltas
+  // into baseStrength. Ranking applies decay live at query time, based on
+  // elapsed time since lastTouched (see query.ts).
   for (const entry of events) {
     const key = edgeKey(entry.from, entry.to);
     const record = edges.get(key) ?? {
-      weight: 0,
+      baseStrength: 0,
       lastTouched: entry.ts,
       traverseCount: 0,
       reinforceCount: 0,
     };
 
-    record.weight += entry.weight_delta;
+    record.baseStrength += entry.weight_delta;
     if (new Date(entry.ts).getTime() > new Date(record.lastTouched).getTime()) {
       record.lastTouched = entry.ts;
     }
@@ -91,17 +96,6 @@ export async function compact(vaultDataDir: string): Promise<CompactionResult> {
     if (entry.type === "reinforce") record.reinforceCount += 1;
 
     edges.set(key, record);
-    touchedKeys.add(key);
-  }
-
-  // Edges carried over from the existing file with no new events this round were
-  // already decayed forward to `compactedAt` above; only re-decay edges that got
-  // fresh events, relative to their (possibly just-updated) lastTouched.
-  for (const key of touchedKeys) {
-    const record = edges.get(key)!;
-    const daysSince =
-      (compactedAt.getTime() - new Date(record.lastTouched).getTime()) / (1000 * 60 * 60 * 24);
-    record.weight = decayWeight(record.weight, daysSince);
   }
 
   const payload: LinkWeightsFile = {
