@@ -63,6 +63,22 @@ export CLAUDE_VAULT_PATH="/path/to/your/vault"
 That's it. Ask Claude to search, read, create, or link notes in your
 vault, and it will use these tools automatically.
 
+### Obsidian plugin (optional)
+
+The `packages/obsidian-plugin` workspace adds a "Neural Graph" view to
+Obsidian that visualizes the same weighted-link data as a force-directed
+graph. It's optional — the MCP server works standalone.
+
+```bash
+npm run build --workspace=packages/obsidian-plugin
+```
+
+Then copy `manifest.json`, `styles.css`, and the generated `main.js` (all
+in `packages/obsidian-plugin/`) into
+`<your-vault>/.obsidian/plugins/vault-neural-links/`, and enable "Vault
+Neural Links" under Community Plugins in Obsidian. Open the view via the
+ribbon icon or the "Open Neural Graph" command.
+
 ## Tools
 
 | Tool | Purpose |
@@ -85,9 +101,9 @@ vault, and it will use these tools automatically.
   no git dependency; usable standalone.
 - **`packages/mcp-server`** (`@vault-neural-links/mcp-server`) — the MCP
   server described above. This is the installable product.
-- **`packages/obsidian-plugin`** — an in-progress Obsidian plugin that
-  visualizes the weighted-link graph as a force-directed layout, reading
-  the same `.vault-neural-links/link-weights.json` the MCP server writes.
+- **`packages/obsidian-plugin`** — an Obsidian plugin that visualizes the
+  weighted-link graph as a force-directed layout, reading the same
+  `.vault-neural-links/link-weights.json` the MCP server writes.
 
 ## Development
 
@@ -95,6 +111,7 @@ vault, and it will use these tools automatically.
 npm install
 npm run build --workspace=packages/core
 npm run build --workspace=packages/mcp-server
+npm run build --workspace=packages/obsidian-plugin
 npm test --workspace=packages/core
 npm test --workspace=packages/mcp-server
 ```

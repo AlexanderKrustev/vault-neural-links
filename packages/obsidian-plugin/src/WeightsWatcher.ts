@@ -29,11 +29,16 @@ export class WeightsWatcher {
   private debounceHandle: ReturnType<typeof setTimeout> | null = null;
   private previous: LinkWeightsFile | null = null;
   private onChange: ((current: LinkWeightsFile, previous: LinkWeightsFile | null) => void) | null = null;
+  private onError: ((err: NodeJS.ErrnoException | unknown) => void) | null = null;
 
   constructor(private readonly filePath: string) {}
 
-  start(onChange: (current: LinkWeightsFile, previous: LinkWeightsFile | null) => void): void {
+  start(
+    onChange: (current: LinkWeightsFile, previous: LinkWeightsFile | null) => void,
+    onError?: (err: NodeJS.ErrnoException | unknown) => void,
+  ): void {
     this.onChange = onChange;
+    this.onError = onError ?? null;
     void this.reload();
 
     const fs = loadFs();
@@ -61,6 +66,7 @@ export class WeightsWatcher {
       this.debounceHandle = null;
     }
     this.onChange = null;
+    this.onError = null;
   }
 
   private scheduleReload(): void {
@@ -72,11 +78,15 @@ export class WeightsWatcher {
     const fs = loadFs();
     if (!fs) return;
     fs.readFile(this.filePath, "utf-8", (err, data) => {
-      if (err) return;
+      if (err) {
+        this.onError?.(err);
+        return;
+      }
       let parsed: LinkWeightsFile;
       try {
         parsed = JSON.parse(data) as LinkWeightsFile;
-      } catch {
+      } catch (parseErr) {
+        this.onError?.(parseErr);
         return;
       }
       if (this.previous?.compactedAt === parsed.compactedAt) return;

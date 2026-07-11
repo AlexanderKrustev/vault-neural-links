@@ -1,10 +1,12 @@
 import { nodeRadius, type ForceSim, type SimEdge, type SimNode } from "./ForceSim.js";
 
 const PULSE_DURATION_MS = 600;
-const EDGE_MAX_AGE_DAYS = 30;
+const DEFAULT_EDGE_MAX_AGE_DAYS = 30;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 5;
 const ZOOM_STEP = 1.2;
+
+export type ColorScheme = "default" | "high-contrast";
 
 interface Pulse {
   key: string;
@@ -19,23 +21,34 @@ function resolvedNode(end: string | SimNode): SimNode | null {
   return typeof end === "string" ? null : end;
 }
 
-// Weight gradient: cold (weak links) -> hot (strong links).
-const WEIGHT_GRADIENT: readonly [number, number, number][] = [
-  [64, 140, 255], // blue
-  [70, 200, 140], // green
-  [235, 220, 60], // yellow
-  [235, 110, 170], // pink
-  [230, 60, 60], // red
-];
+// Weight gradients: cold (weak links) -> hot (strong links).
+const WEIGHT_GRADIENTS: Record<ColorScheme, readonly [number, number, number][]> = {
+  default: [
+    [64, 140, 255], // blue
+    [70, 200, 140], // green
+    [235, 220, 60], // yellow
+    [235, 110, 170], // pink
+    [230, 60, 60], // red
+  ],
+  // wider perceptual spacing between stops for readers who struggle to
+  // distinguish the default palette's green/yellow/pink midtones
+  "high-contrast": [
+    [0, 120, 255], // blue
+    [0, 220, 220], // cyan
+    [255, 230, 0], // yellow
+    [255, 140, 0], // orange
+    [255, 0, 90], // magenta
+  ],
+};
 
-function weightColor(t: number): [number, number, number] {
+function weightColor(t: number, gradient: readonly [number, number, number][]): [number, number, number] {
   const clamped = Math.max(0, Math.min(1, t));
-  const segments = WEIGHT_GRADIENT.length - 1;
+  const segments = gradient.length - 1;
   const scaled = clamped * segments;
   const idx = Math.min(segments - 1, Math.floor(scaled));
   const localT = scaled - idx;
-  const [r1, g1, b1] = WEIGHT_GRADIENT[idx];
-  const [r2, g2, b2] = WEIGHT_GRADIENT[idx + 1];
+  const [r1, g1, b1] = gradient[idx];
+  const [r2, g2, b2] = gradient[idx + 1];
   return [Math.round(r1 + (r2 - r1) * localT), Math.round(g1 + (g2 - g1) * localT), Math.round(b1 + (b2 - b1) * localT)];
 }
 
@@ -58,6 +71,8 @@ export class Renderer {
   private scale = 1;
   private panX = 0;
   private panY = 0;
+  private gradient = WEIGHT_GRADIENTS.default;
+  private edgeMaxAgeDays = DEFAULT_EDGE_MAX_AGE_DAYS;
 
   // drag state: either panning the canvas or dragging a single node
   private dragNode: SimNode | null = null;
@@ -94,6 +109,14 @@ export class Renderer {
 
   onNodeClicked(callback: (id: string) => void): void {
     this.onNodeClick = callback;
+  }
+
+  setColorScheme(scheme: ColorScheme): void {
+    this.gradient = WEIGHT_GRADIENTS[scheme];
+  }
+
+  setEdgeMaxAgeDays(days: number): void {
+    this.edgeMaxAgeDays = days;
   }
 
   start(): void {
@@ -215,14 +238,14 @@ export class Renderer {
       }
 
       const ageDays = (Date.now() - Date.parse(edge.lastTouched)) / 86_400_000;
-      const freshness = Math.max(0, 1 - ageDays / EDGE_MAX_AGE_DAYS);
+      const freshness = Math.max(0, 1 - ageDays / this.edgeMaxAgeDays);
       const thickness = Math.max(0.5, Math.log2(edge.weight + 1));
       const pulse = this.pulses.find((p) => p.key === edgeKey(source.id, target.id));
       const pulseBoost = pulse ? 1 - (now - pulse.start) / PULSE_DURATION_MS : 0;
 
       // color always reflects weight — hover only ever adjusts opacity/width, never the gradient hue
       const maxWeight = this.sim.getMaxWeight();
-      const [r, g, b] = weightColor(maxWeight > 0 ? edge.weight / maxWeight : 0);
+      const [r, g, b] = weightColor(maxWeight > 0 ? edge.weight / maxWeight : 0, this.gradient);
 
       const baseAlpha = Math.min(1, 0.15 + freshness * 0.7 + pulseBoost * 0.5);
       const alpha = touchesHoveredNode ? 1 : dimmed ? baseAlpha * 0.15 : baseAlpha;

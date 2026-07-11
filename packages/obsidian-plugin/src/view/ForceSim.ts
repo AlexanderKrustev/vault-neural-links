@@ -118,6 +118,8 @@ export class ForceSim {
   private degree = new Map<string, number>();
   private tickCallback: ((nodes: SimNode[]) => void) | null = null;
   private continuousAnimation = false;
+  /** carried across setData calls so unchanged notes keep their position instead of re-exploding */
+  private nodesById = new Map<string, SimNode>();
 
   onTick(callback: (nodes: SimNode[]) => void): void {
     this.tickCallback = callback;
@@ -153,10 +155,11 @@ export class ForceSim {
     }
   }
 
-  setData(notePaths: string[], weights: LinkWeightsFile, nativeEdges: NativeEdge[] = []): void {
+  setData(notePaths: string[], weights: LinkWeightsFile, nativeEdges: NativeEdge[] = [], minWeight = 0): void {
     const ids = new Set(notePaths);
     const neuralEdges: SimEdge[] = [];
     for (const [key, record] of Object.entries(weights.edges)) {
+      if (record.weight < minWeight) continue;
       const [source, target] = key.split("|");
       if (source === undefined || target === undefined) continue;
       // edge endpoints may not match a known note path (e.g. traversal events
@@ -174,7 +177,13 @@ export class ForceSim {
       nativeSimEdges.push({ source, target, kind: "native", weight: 0, lastTouched: "" });
     }
 
-    const nodes: SimNode[] = [...ids].map((id) => ({ id }));
+    // reuse existing node objects by id so notes unaffected by this update keep
+    // their current x/y/velocity instead of the whole graph re-exploding from
+    // a cold layout every time the weights file changes
+    const wasFirstLoad = this.simulation === null;
+    const nodes: SimNode[] = [...ids].map((id) => this.nodesById.get(id) ?? { id });
+    this.nodesById = new Map(nodes.map((n) => [n.id, n]));
+
     const edges = [...nativeSimEdges, ...neuralEdges];
     this.edges = edges;
     this.maxWeight = neuralEdges.reduce((max, e) => Math.max(max, e.weight), 0);
@@ -203,6 +212,10 @@ export class ForceSim {
       // notes with no connections at all are kept at or beyond the reach of
       // the connected cluster, instead of drifting in among it
       .force("isolate", createIsolateRingForce(degree));
+
+    // incremental updates start from a mild reheat, not a full cold-start alpha=1,
+    // since reused nodes already have sensible positions
+    if (!wasFirstLoad) this.simulation.alpha(0.3);
 
     if (this.continuousAnimation) {
       this.simulation.force("jitter", createJitterForce());

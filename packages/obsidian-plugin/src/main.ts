@@ -1,4 +1,5 @@
 import { Plugin, WorkspaceLeaf } from "obsidian";
+import { VaultNeuralLinksSettingTab } from "./SettingTab.js";
 import { DEFAULT_SETTINGS, type VaultNeuralLinksSettings } from "./settings.js";
 import { NEURAL_GRAPH_VIEW_TYPE, NeuralGraphView } from "./view/NeuralGraphView.js";
 
@@ -9,6 +10,7 @@ export default class VaultNeuralLinksPlugin extends Plugin {
     this.settings = { ...DEFAULT_SETTINGS, ...(await this.loadData()) };
 
     this.registerView(NEURAL_GRAPH_VIEW_TYPE, (leaf: WorkspaceLeaf) => new NeuralGraphView(leaf, this));
+    this.addSettingTab(new VaultNeuralLinksSettingTab(this.app, this));
 
     this.addRibbonIcon("git-fork", "Open Neural Graph", () => {
       void this.activateView();
@@ -27,6 +29,13 @@ export default class VaultNeuralLinksPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /** Re-applies current settings to every open Neural Graph view without waiting for a data change. */
+  refreshGraphViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(NEURAL_GRAPH_VIEW_TYPE)) {
+      if (leaf.view instanceof NeuralGraphView) leaf.view.applySettings();
+    }
   }
 
   private async activateView(): Promise<void> {

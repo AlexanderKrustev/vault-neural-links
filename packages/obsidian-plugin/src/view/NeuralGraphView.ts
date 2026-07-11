@@ -12,6 +12,9 @@ export class NeuralGraphView extends ItemView {
   private sim: ForceSim | null = null;
   private renderer: Renderer | null = null;
   private watcher: WeightsWatcher | null = null;
+  private statusEl: HTMLDivElement | null = null;
+  private lastWeights: LinkWeightsFile | null = null;
+  private firstLoadDone = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -41,8 +44,13 @@ export class NeuralGraphView extends ItemView {
     this.sim = new ForceSim();
     this.sim.setContinuousAnimation(this.plugin.settings.continuousAnimation);
     this.renderer = new Renderer(this.canvas, this.sim);
+    this.renderer.setColorScheme(this.plugin.settings.colorScheme);
+    this.renderer.setEdgeMaxAgeDays(this.plugin.settings.decayHalfLifeDays);
     this.renderer.onNodeClicked((path) => this.openNote(path));
     this.renderer.start();
+
+    this.statusEl = container.createDiv({ cls: "vault-neural-links-status" });
+    this.statusEl.setText("Loading graph…");
 
     const controls = container.createDiv({ cls: "vault-neural-links-zoom-controls" });
     const renderer = this.renderer;
@@ -74,7 +82,10 @@ export class NeuralGraphView extends ItemView {
 
     const weightsPath = `${adapter.getBasePath()}/.vault-neural-links/link-weights.json`;
     this.watcher = new WeightsWatcher(weightsPath);
-    this.watcher.start((current, previous) => this.onWeightsChanged(current, previous));
+    this.watcher.start(
+      (current, previous) => this.onWeightsChanged(current, previous),
+      (err) => this.onWeightsError(err),
+    );
   }
 
   async onClose(): Promise<void> {
@@ -85,11 +96,45 @@ export class NeuralGraphView extends ItemView {
     this.sim = null;
   }
 
+  /** Re-applies plugin settings (color scheme, decay window, min-weight filter, animation) to a live view. */
+  applySettings(): void {
+    if (!this.sim || !this.renderer) return;
+    this.renderer.setColorScheme(this.plugin.settings.colorScheme);
+    this.renderer.setEdgeMaxAgeDays(this.plugin.settings.decayHalfLifeDays);
+    this.sim.setContinuousAnimation(this.plugin.settings.continuousAnimation);
+    if (this.lastWeights) {
+      const notePaths = this.app.vault.getMarkdownFiles().map((f) => f.path.replace(/\.md$/, ""));
+      this.sim.setData(notePaths, this.lastWeights, this.getNativeEdges(), this.plugin.settings.minWeightFilter);
+    }
+  }
+
+  private onWeightsError(err: NodeJS.ErrnoException | unknown): void {
+    if (this.firstLoadDone) {
+      // graph is already showing data; a transient read/parse failure (e.g. mid-compaction
+      // write race) shouldn't blank it out — just log for diagnosis
+      console.error("Vault Neural Links: failed to read link-weights.json", err);
+      return;
+    }
+    const isMissing = (err as NodeJS.ErrnoException)?.code === "ENOENT";
+    this.statusEl?.setText(
+      isMissing
+        ? "No link-weights.json yet — create or link some notes via the vault-neural-link MCP server first."
+        : "Failed to read link-weights.json — see the developer console for details.",
+    );
+    if (!isMissing) console.error("Vault Neural Links: failed to read link-weights.json", err);
+  }
+
   private onWeightsChanged(current: LinkWeightsFile, previous: LinkWeightsFile | null): void {
     if (!this.sim) return;
+    if (!this.firstLoadDone) {
+      this.firstLoadDone = true;
+      this.statusEl?.remove();
+      this.statusEl = null;
+    }
+    this.lastWeights = current;
     const notePaths = this.app.vault.getMarkdownFiles().map((f) => f.path.replace(/\.md$/, ""));
     try {
-      this.sim.setData(notePaths, current, this.getNativeEdges());
+      this.sim.setData(notePaths, current, this.getNativeEdges(), this.plugin.settings.minWeightFilter);
     } catch (err) {
       console.error("Vault Neural Links: failed to render graph", err);
       return;
