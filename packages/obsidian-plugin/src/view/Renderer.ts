@@ -277,13 +277,23 @@ export class Renderer {
       ctx.fillStyle = isHovered ? "rgba(255, 200, 80, 0.95)" : `rgba(220, 220, 230, ${nodeAlpha})`;
       ctx.fill();
 
+      if (this.sim.getConsolidatedScore(node.id) > 0) {
+        ctx.save();
+        ctx.lineWidth = 1.5 / this.scale;
+        ctx.strokeStyle = "rgba(230, 190, 60, 0.95)";
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + 4 / this.scale, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       if (this.primedNotes.has(node.id)) {
         ctx.save();
         ctx.setLineDash([4 / this.scale, 3 / this.scale]);
         ctx.lineWidth = 1.5 / this.scale;
         ctx.strokeStyle = "rgba(255, 170, 60, 0.9)";
         ctx.beginPath();
-        ctx.arc(node.x, node.y, radius + 4 / this.scale, 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, radius + 8 / this.scale, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }

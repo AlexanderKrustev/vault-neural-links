@@ -138,6 +138,8 @@ export class ForceSim {
   private degree = new Map<string, number>();
   /** most recent lastTouched among each note's incident "neural" (usage) edges — native wikilinks don't carry recency */
   private lastTouched = new Map<string, string>();
+  /** max consolidatedScore across each note's incident neural edges — >0 means "consolidated into long-term memory" */
+  private consolidated = new Map<string, number>();
   private tickCallback: ((nodes: SimNode[]) => void) | null = null;
   private continuousAnimation = false;
   /** carried across setData calls so unchanged notes keep their position instead of re-exploding */
@@ -165,6 +167,11 @@ export class ForceSim {
     return this.lastTouched.get(id);
   }
 
+  /** Highest consolidatedScore across this note's incident neural edges; 0 if never promoted. */
+  getConsolidatedScore(id: string): number {
+    return this.consolidated.get(id) ?? 0;
+  }
+
   /** Wake the simulation so it reorganizes around a change (e.g. a node drag). */
   reheat(alpha = 0.3): void {
     this.simulation?.alphaTarget(this.continuousAnimation ? JITTER_ALPHA_TARGET : 0).alpha(alpha).restart();
@@ -185,6 +192,7 @@ export class ForceSim {
   setData(notePaths: string[], weights: LinkWeightsFile, nativeEdges: NativeEdge[] = [], minWeight = 0): void {
     const ids = new Set(notePaths);
     const neuralEdges: SimEdge[] = [];
+    const consolidated = new Map<string, number>();
     for (const [key, record] of Object.entries(weights.edges)) {
       const weight = liveWeight(record.baseStrength, record.lastTouched, record.consolidatedScore);
       if (weight < minWeight) continue;
@@ -196,7 +204,11 @@ export class ForceSim {
       ids.add(source);
       ids.add(target);
       neuralEdges.push({ source, target, kind: "neural", weight, lastTouched: record.lastTouched });
+
+      if (record.consolidatedScore > (consolidated.get(source) ?? 0)) consolidated.set(source, record.consolidatedScore);
+      if (record.consolidatedScore > (consolidated.get(target) ?? 0)) consolidated.set(target, record.consolidatedScore);
     }
+    this.consolidated = consolidated;
 
     const nativeSimEdges: SimEdge[] = [];
     for (const { source, target } of nativeEdges) {
