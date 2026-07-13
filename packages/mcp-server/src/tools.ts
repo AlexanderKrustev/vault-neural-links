@@ -4,7 +4,6 @@ import {
   appendUnderHeading,
   autoLinkScan,
   getEdgeWeight,
-  getWeightedNeighbors,
   initInstance,
   listNotes,
   readNote,
@@ -39,7 +38,7 @@ export const getWeightedNeighborsTool = {
     },
   },
   handler: (ctx: ToolContext) => async ({ note, topK }: { note: string; topK?: number }) => {
-    const neighbors = await getWeightedNeighbors(ctx.vaultDataDir, note, topK, ctx.vaultPath);
+    const neighbors = await ctx.client.getWeightedNeighbors(note, topK);
     return textResult(neighbors);
   },
 };

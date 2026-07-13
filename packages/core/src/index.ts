@@ -3,11 +3,13 @@ import { appendEvent } from "./logger.js";
 import { compact } from "./compactor.js";
 import { getWeightedNeighbors } from "./query.js";
 import { resolveDataDir } from "./vaultPaths.js";
+import { SessionBuffer } from "./priming.js";
 import type { CompactionResult, WeightedNeighbor } from "./types.js";
 
 export * from "./types.js";
 export * from "./parser.js";
 export * from "./decay.js";
+export * from "./priming.js";
 export { appendEvent } from "./logger.js";
 export { compact } from "./compactor.js";
 export { getWeightedNeighbors, getEdgeWeight } from "./query.js";
@@ -28,9 +30,12 @@ export interface VaultLinkClient {
 
 export function initInstance(vaultPath: string, instanceId: string = randomUUID()): VaultLinkClient {
   const vaultDataDir = resolveDataDir(vaultPath);
+  const sessionBuffer = new SessionBuffer();
 
   return {
     async logTraversal(from: string, to: string) {
+      sessionBuffer.touch(from);
+      sessionBuffer.touch(to);
       await appendEvent(vaultDataDir, instanceId, {
         ts: new Date().toISOString(),
         instance: instanceId,
@@ -42,6 +47,8 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     },
 
     async reinforce(from: string, to: string, boost: number = DEFAULT_REINFORCE_BOOST) {
+      sessionBuffer.touch(from);
+      sessionBuffer.touch(to);
       await appendEvent(vaultDataDir, instanceId, {
         ts: new Date().toISOString(),
         instance: instanceId,
@@ -53,7 +60,8 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     },
 
     async getWeightedNeighbors(note: string, topK = 10) {
-      return getWeightedNeighbors(vaultDataDir, note, topK, vaultPath);
+      sessionBuffer.touch(note);
+      return getWeightedNeighbors(vaultDataDir, note, topK, vaultPath, sessionBuffer);
     },
 
     async compact() {

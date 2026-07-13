@@ -62,3 +62,18 @@ export const DEFAULT_NOTE_TYPE_DECAY_CONFIG: NoteTypeDecayConfig = {
     project: 14,
   },
 };
+
+/**
+ * Controls the session-scoped priming buffer: how many recently-accessed
+ * notes it remembers, and how much weight bonus a note in the buffer gets
+ * during retrieval.
+ */
+export interface PrimingConfig {
+  bufferSize: number;
+  bonus: number;
+}
+
+export const DEFAULT_PRIMING_CONFIG: PrimingConfig = {
+  bufferSize: 20,
+  bonus: 2,
+};

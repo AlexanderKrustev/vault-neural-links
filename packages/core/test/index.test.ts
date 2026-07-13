@@ -3,6 +3,20 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initInstance } from "../src/index.js";
+import { appendEvent } from "../src/logger.js";
+import type { EventLogEntry } from "../src/types.js";
+
+function event(overrides: Partial<EventLogEntry>): EventLogEntry {
+  return {
+    ts: new Date().toISOString(),
+    instance: "seed",
+    type: "traverse",
+    from: "A",
+    to: "B",
+    weight_delta: 1,
+    ...overrides,
+  };
+}
 
 describe("initInstance", () => {
   let vaultPath: string;
@@ -33,5 +47,25 @@ describe("initInstance", () => {
     await client.logTraversal("A", "B");
     const result = await client.compact();
     expect(result.edgeCount).toBe(1);
+  });
+
+  it("gives a session-primed neighbor a higher score than an equally-weighted one that hasn't been touched this session", async () => {
+    const vaultDataDir = join(vaultPath, ".vault-neural-links");
+    // Seed both edges directly (bypassing the client) so seeding itself
+    // doesn't touch the session buffer.
+    await appendEvent(vaultDataDir, "seed", event({ from: "A", to: "B", weight_delta: 1 }));
+    await appendEvent(vaultDataDir, "seed", event({ from: "A", to: "C", weight_delta: 1 }));
+
+    const client = initInstance(vaultPath, "test-instance");
+    await client.compact();
+
+    // Only B is visited this session; C has identical base weight but is
+    // never touched, so only B should carry the priming bonus.
+    await client.logTraversal("X", "B");
+
+    const neighbors = await client.getWeightedNeighbors("A");
+    const b = neighbors.find((n) => n.path === "B")!;
+    const c = neighbors.find((n) => n.path === "C")!;
+    expect(b.weight).toBeGreaterThan(c.weight);
   });
 });

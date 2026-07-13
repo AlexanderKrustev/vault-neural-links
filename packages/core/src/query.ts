@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { EdgeRecord, LinkWeightsFile, NoteTypeDecayConfig, WeightedNeighbor } from "./types.js";
 import { decayWeight, resolveHalfLifeDays } from "./decay.js";
 import { parseFrontmatter } from "./frontmatter.js";
+import { primingBonus, type SessionBuffer } from "./priming.js";
 
 async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null> {
   try {
@@ -58,6 +59,7 @@ export async function getWeightedNeighbors(
   note: string,
   topK = 10,
   vaultPath?: string,
+  sessionBuffer?: SessionBuffer,
 ): Promise<WeightedNeighbor[]> {
   const weights = await loadWeights(vaultDataDir);
   if (!weights) return [];
@@ -68,7 +70,8 @@ export async function getWeightedNeighbors(
     const [a, b] = key.split("|");
     const other = a === note ? b : b === note ? a : undefined;
     if (other === undefined) continue;
-    const weight = await liveWeight(vaultPath, other, record, now);
+    const baseWeight = await liveWeight(vaultPath, other, record, now);
+    const weight = sessionBuffer ? baseWeight + primingBonus(other, sessionBuffer) : baseWeight;
     neighbors.push({ path: other, weight, lastTouched: record.lastTouched });
   }
 

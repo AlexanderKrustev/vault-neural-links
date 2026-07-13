@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { appendEvent } from "@vault-neural-links/core";
 import {
   compactWeightsTool,
   createNoteTool,
@@ -76,6 +77,37 @@ describe("mcp-server tools", () => {
 
     const neighbors = parseResult(await getWeightedNeighborsTool.handler(ctx)({ note: "A", topK: 1 }));
     expect(neighbors).toHaveLength(1);
+  });
+
+  it("get_weighted_neighbors gives a session-primed neighbor a boosted score over an equally-weighted one", async () => {
+    // Seed edges directly (bypassing the client's tools, which themselves
+    // touch the session buffer) so only the later log_traversal call primes B.
+    await appendEvent(ctx.vaultDataDir, "seed", {
+      ts: new Date().toISOString(),
+      instance: "seed",
+      type: "reinforce",
+      from: "A",
+      to: "B",
+      weight_delta: 5,
+    });
+    await appendEvent(ctx.vaultDataDir, "seed", {
+      ts: new Date().toISOString(),
+      instance: "seed",
+      type: "reinforce",
+      from: "A",
+      to: "C",
+      weight_delta: 5,
+    });
+    await compactWeightsTool.handler(ctx)({});
+
+    // Visiting B this session (via log_traversal) should prime it; C is
+    // never independently touched despite having the identical base weight.
+    await logTraversalTool.handler(ctx)({ from: "X", to: "B" });
+
+    const neighbors = parseResult(await getWeightedNeighborsTool.handler(ctx)({ note: "A" }));
+    const b = neighbors.find((n: { path: string }) => n.path === "B");
+    const c = neighbors.find((n: { path: string }) => n.path === "C");
+    expect(b.weight).toBeGreaterThan(c.weight);
   });
 
   it("create_note writes a note and reports autoLinked, then errors on a duplicate create", async () => {
