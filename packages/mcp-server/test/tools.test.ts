@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "@vault-neural-links/core";
 import {
+  activateTool,
   compactWeightsTool,
   createNoteTool,
   getEdgeWeightTool,
@@ -108,6 +109,26 @@ describe("mcp-server tools", () => {
     const b = neighbors.find((n: { path: string }) => n.path === "B");
     const c = neighbors.find((n: { path: string }) => n.path === "C");
     expect(b.weight).toBeGreaterThan(c.weight);
+  });
+
+  it("activate surfaces a two-hop neighbor not directly linked to the origin", async () => {
+    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
+    await reinforceLinkTool.handler(ctx)({ from: "B", to: "C", boost: 10 });
+    await compactWeightsTool.handler(ctx)({});
+
+    const activated = parseResult(await activateTool.handler(ctx)({ note: "A" }));
+    const c = activated.find((n: { path: string }) => n.path === "C");
+    expect(c).toBeDefined();
+    expect(c.hops).toBe(2);
+  });
+
+  it("activate respects maxHops override", async () => {
+    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
+    await reinforceLinkTool.handler(ctx)({ from: "B", to: "C", boost: 10 });
+    await compactWeightsTool.handler(ctx)({});
+
+    const activated = parseResult(await activateTool.handler(ctx)({ note: "A", maxHops: 1 }));
+    expect(activated.map((n: { path: string }) => n.path)).toEqual(["B"]);
   });
 
   it("create_note writes a note and reports autoLinked, then errors on a duplicate create", async () => {

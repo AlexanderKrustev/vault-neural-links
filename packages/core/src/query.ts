@@ -58,10 +58,16 @@ async function liveWeight(
  * Reads link-weights.json and returns top-K neighbors for a note,
  * sorted by weight descending.
  */
-export async function getWeightedNeighbors(
+/**
+ * All of a note's direct neighbors with live-decayed weight applied, in no
+ * particular order and with no topK cutoff or supersession lookup — the
+ * shared building block for both single-hop retrieval (getWeightedNeighbors)
+ * and multi-hop spreading activation (activation.ts), which each need a
+ * different slice/decoration of the same raw edge scan.
+ */
+export async function computeLiveNeighborWeights(
   vaultDataDir: string,
   note: string,
-  topK = 10,
   vaultPath?: string,
   sessionBuffer?: SessionBuffer,
 ): Promise<WeightedNeighbor[]> {
@@ -78,6 +84,22 @@ export async function getWeightedNeighbors(
     const weight = sessionBuffer ? baseWeight + primingBonus(other, sessionBuffer) : baseWeight;
     neighbors.push({ path: other, weight, lastTouched: record.lastTouched });
   }
+
+  return neighbors;
+}
+
+/**
+ * Reads link-weights.json and returns top-K neighbors for a note,
+ * sorted by weight descending.
+ */
+export async function getWeightedNeighbors(
+  vaultDataDir: string,
+  note: string,
+  topK = 10,
+  vaultPath?: string,
+  sessionBuffer?: SessionBuffer,
+): Promise<WeightedNeighbor[]> {
+  const neighbors = await computeLiveNeighborWeights(vaultDataDir, note, vaultPath, sessionBuffer);
 
   neighbors.sort((x, y) => y.weight - x.weight);
   const topNeighbors = neighbors.slice(0, topK);

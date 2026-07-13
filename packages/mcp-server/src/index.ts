@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
+  activateTool,
   compactWeightsTool,
   createNoteTool,
   getEdgeWeightTool,
@@ -32,6 +33,7 @@ const server = new McpServer({
 });
 
 server.registerTool(getWeightedNeighborsTool.name, getWeightedNeighborsTool.config, getWeightedNeighborsTool.handler(ctx));
+server.registerTool(activateTool.name, activateTool.config, activateTool.handler(ctx));
 server.registerTool(getEdgeWeightTool.name, getEdgeWeightTool.config, getEdgeWeightTool.handler(ctx));
 server.registerTool(logTraversalTool.name, logTraversalTool.config, logTraversalTool.handler(ctx));
 server.registerTool(reinforceLinkTool.name, reinforceLinkTool.config, reinforceLinkTool.handler(ctx));

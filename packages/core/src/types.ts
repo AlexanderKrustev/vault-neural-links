@@ -120,3 +120,31 @@ export interface ConsolidationResult {
   promotedCount: number;
   consolidatedAt: string;
 }
+
+
+/**
+ * Controls spreading activation: retrieval that follows edges past a note's
+ * direct neighbors so indirect (multi-hop) context can surface too, instead
+ * of being invisible to callers that only ever asked for direct neighbors.
+ */
+export interface SpreadingActivationConfig {
+  /** Fraction of a node's energy carried forward into the next hop, before being split across its neighbors by relative edge weight. */
+  energyEdgeWeightDecayPerHop: number;
+  /** Hard cap on hops from the origin note (bounded to 2-3 per the design — unbounded spread would turn a local query into a full-graph walk). */
+  maxHops: number;
+  /** Energy below this stops both further propagation from a node and inclusion of that node in results. */
+  minThreshold: number;
+}
+
+export const DEFAULT_SPREADING_ACTIVATION_CONFIG: SpreadingActivationConfig = {
+  energyEdgeWeightDecayPerHop: 0.5,
+  maxHops: 3,
+  minThreshold: 0.5,
+};
+
+export interface ActivatedNote {
+  path: string;
+  energy: number;
+  /** Fewest hops from the origin note at which this note was reached. */
+  hops: number;
+}

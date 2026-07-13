@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { appendEvent } from "./logger.js";
 import { compact } from "./compactor.js";
-import { getWeightedNeighbors } from "./query.js";
+import { getWeightedNeighbors, computeLiveNeighborWeights } from "./query.js";
+import { activate } from "./activation.js";
 import { resolveDataDir } from "./vaultPaths.js";
 import { SessionBuffer, persistSessionBuffer } from "./priming.js";
-import type { CompactionResult, WeightedNeighbor } from "./types.js";
+import type { ActivatedNote, CompactionResult, SpreadingActivationConfig, WeightedNeighbor } from "./types.js";
 
 export * from "./types.js";
 export * from "./parser.js";
@@ -14,7 +15,8 @@ export { appendEvent } from "./logger.js";
 export { compact } from "./compactor.js";
 export { consolidate, runNightlyConsolidation } from "./consolidation.js";
 export { resolveSupersededBy, readSupersession } from "./relations.js";
-export { getWeightedNeighbors, getEdgeWeight } from "./query.js";
+export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from "./query.js";
+export { activate } from "./activation.js";
 export { resolveDataDir } from "./vaultPaths.js";
 export * from "./frontmatter.js";
 export * from "./notes.js";
@@ -22,11 +24,13 @@ export * from "./autolink.js";
 export * from "./changelog.js";
 
 const DEFAULT_REINFORCE_BOOST = 5;
+const DEFAULT_ACTIVATION_ENERGY = 10;
 
 export interface VaultLinkClient {
   logTraversal(from: string, to: string): Promise<void>;
   reinforce(from: string, to: string, boost?: number): Promise<void>;
   getWeightedNeighbors(note: string, topK?: number): Promise<WeightedNeighbor[]>;
+  activate(note: string, energy?: number, config?: SpreadingActivationConfig): Promise<ActivatedNote[]>;
   compact(): Promise<CompactionResult>;
 }
 
@@ -67,6 +71,11 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     async getWeightedNeighbors(note: string, topK = 10) {
       await touch(note);
       return getWeightedNeighbors(vaultDataDir, note, topK, vaultPath, sessionBuffer);
+    },
+
+    async activate(note: string, energy: number = DEFAULT_ACTIVATION_ENERGY, config?: SpreadingActivationConfig) {
+      await touch(note);
+      return activate(vaultDataDir, note, energy, config, vaultPath, sessionBuffer);
     },
 
     async compact() {

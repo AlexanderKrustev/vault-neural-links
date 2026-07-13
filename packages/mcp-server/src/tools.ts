@@ -3,6 +3,7 @@ import {
   appendChangelogEntry,
   appendUnderHeading,
   autoLinkScan,
+  DEFAULT_SPREADING_ACTIVATION_CONFIG,
   getEdgeWeight,
   initInstance,
   listNotes,
@@ -41,6 +42,47 @@ export const getWeightedNeighborsTool = {
     const neighbors = await ctx.client.getWeightedNeighbors(note, topK);
     return textResult(neighbors);
   },
+};
+
+
+export const activateTool = {
+  name: "activate",
+  config: {
+    title: "Activate (spreading activation)",
+    description:
+      "Spreads activation energy outward from a note across bounded multi-hop neighbors (up to " +
+      "maxHops away), so notes only indirectly linked through an intermediate note can surface " +
+      "too — unlike get_weighted_neighbors, which only ever sees direct links. A note reachable " +
+      "through several indirect routes accumulates energy from each and can outrank one reachable " +
+      "through a single weak direct link. Use this when direct neighbors alone seem to be missing " +
+      "relevant indirect context.",
+    inputSchema: {
+      note: z.string().describe("Vault-relative note path, without .md extension"),
+      energy: z.number().positive().optional().describe("Starting energy at the origin note (default 10)"),
+      maxHops: z.number().int().positive().max(3).optional().describe("Max hops from the origin note (default 3)"),
+      minThreshold: z.number().positive().optional().describe("Energy cutoff below which propagation/inclusion stops (default 0.5)"),
+    },
+  },
+  handler:
+    (ctx: ToolContext) =>
+    async ({
+      note,
+      energy,
+      maxHops,
+      minThreshold,
+    }: {
+      note: string;
+      energy?: number;
+      maxHops?: number;
+      minThreshold?: number;
+    }) => {
+      const config =
+        maxHops !== undefined || minThreshold !== undefined
+          ? { ...DEFAULT_SPREADING_ACTIVATION_CONFIG, ...(maxHops !== undefined && { maxHops }), ...(minThreshold !== undefined && { minThreshold }) }
+          : undefined;
+      const activated = await ctx.client.activate(note, energy, config);
+      return textResult(activated);
+    },
 };
 
 export const getEdgeWeightTool = {
