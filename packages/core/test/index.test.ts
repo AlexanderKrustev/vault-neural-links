@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { initInstance } from "../src/index.js";
 import { appendEvent } from "../src/logger.js";
-import type { EventLogEntry } from "../src/types.js";
+import { sessionBufferFilePath } from "../src/priming.js";
+import type { EventLogEntry, SessionBufferFile } from "../src/types.js";
 
 function event(overrides: Partial<EventLogEntry>): EventLogEntry {
   return {
@@ -67,5 +69,16 @@ describe("initInstance", () => {
     const b = neighbors.find((n) => n.path === "B")!;
     const c = neighbors.find((n) => n.path === "C")!;
     expect(b.weight).toBeGreaterThan(c.weight);
+  });
+
+  it("persists the session buffer to disk so out-of-process consumers can read it", async () => {
+    const client = initInstance(vaultPath, "test-instance");
+    await client.logTraversal("A", "B");
+
+    const vaultDataDir = join(vaultPath, ".vault-neural-links");
+    const raw = await readFile(sessionBufferFilePath(vaultDataDir, "test-instance"), "utf8");
+    const parsed = JSON.parse(raw) as SessionBufferFile;
+    expect(parsed.instance).toBe("test-instance");
+    expect(parsed.notes).toEqual(["A", "B"]);
   });
 });

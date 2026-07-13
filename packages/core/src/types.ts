@@ -77,3 +77,15 @@ export const DEFAULT_PRIMING_CONFIG: PrimingConfig = {
   bufferSize: 20,
   bonus: 2,
 };
+
+
+/**
+ * Persisted snapshot of one MCP server instance's in-memory SessionBuffer,
+ * written under `.vault-neural-links/session/<instance>.json` so the
+ * Obsidian plugin (a separate process) can render primed-note state.
+ */
+export interface SessionBufferFile {
+  instance: string;
+  updatedAt: string;
+  notes: string[];
+}

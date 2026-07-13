@@ -1,4 +1,6 @@
-import type { PrimingConfig } from "./types.js";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import type { PrimingConfig, SessionBufferFile } from "./types.js";
 import { DEFAULT_PRIMING_CONFIG } from "./types.js";
 
 /**
@@ -42,4 +44,33 @@ export function primingBonus(
   config: PrimingConfig = DEFAULT_PRIMING_CONFIG,
 ): number {
   return buffer.has(note) ? config.bonus : 0;
+}
+
+
+export function sessionBufferFilePath(vaultDataDir: string, instanceId: string): string {
+  return join(vaultDataDir, "session", `${instanceId}.json`);
+}
+
+/**
+ * Writes the session buffer to disk so out-of-process consumers (the
+ * Obsidian plugin's graph view) can render "primed" notes — the buffer
+ * itself never leaves memory otherwise, since it's scoped to this MCP
+ * server instance. One file per instance, overwritten on every touch;
+ * consumers should treat files whose `updatedAt` is stale (session likely
+ * ended) as no longer primed, since there's no clean-shutdown hook to
+ * delete them.
+ */
+export async function persistSessionBuffer(
+  vaultDataDir: string,
+  instanceId: string,
+  buffer: SessionBuffer,
+): Promise<void> {
+  const filePath = sessionBufferFilePath(vaultDataDir, instanceId);
+  const payload: SessionBufferFile = {
+    instance: instanceId,
+    updatedAt: new Date().toISOString(),
+    notes: [...buffer.entries()],
+  };
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, JSON.stringify(payload), "utf8");
 }

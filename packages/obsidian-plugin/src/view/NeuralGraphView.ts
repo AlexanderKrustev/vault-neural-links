@@ -2,6 +2,7 @@ import { FileSystemAdapter, ItemView, WorkspaceLeaf } from "obsidian";
 import type { LinkWeightsFile } from "@vault-neural-links/core";
 import type VaultNeuralLinksPlugin from "../main.js";
 import { WeightsWatcher } from "../WeightsWatcher.js";
+import { PrimedWatcher } from "../PrimedWatcher.js";
 import { ForceSim, type NativeEdge } from "./ForceSim.js";
 import { Renderer } from "./Renderer.js";
 
@@ -12,6 +13,7 @@ export class NeuralGraphView extends ItemView {
   private sim: ForceSim | null = null;
   private renderer: Renderer | null = null;
   private watcher: WeightsWatcher | null = null;
+  private primedWatcher: PrimedWatcher | null = null;
   private statusEl: HTMLDivElement | null = null;
   private lastWeights: LinkWeightsFile | null = null;
   private firstLoadDone = false;
@@ -86,11 +88,17 @@ export class NeuralGraphView extends ItemView {
       (current, previous) => this.onWeightsChanged(current, previous),
       (err) => this.onWeightsError(err),
     );
+
+    const sessionDir = `${adapter.getBasePath()}/.vault-neural-links/session`;
+    this.primedWatcher = new PrimedWatcher(sessionDir);
+    this.primedWatcher.start((primed) => this.renderer?.setPrimedNotes(primed));
   }
 
   async onClose(): Promise<void> {
     this.watcher?.stop();
     this.watcher = null;
+    this.primedWatcher?.stop();
+    this.primedWatcher = null;
     this.renderer?.stop();
     this.renderer = null;
     this.sim = null;

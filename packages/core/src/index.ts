@@ -3,7 +3,7 @@ import { appendEvent } from "./logger.js";
 import { compact } from "./compactor.js";
 import { getWeightedNeighbors } from "./query.js";
 import { resolveDataDir } from "./vaultPaths.js";
-import { SessionBuffer } from "./priming.js";
+import { SessionBuffer, persistSessionBuffer } from "./priming.js";
 import type { CompactionResult, WeightedNeighbor } from "./types.js";
 
 export * from "./types.js";
@@ -32,10 +32,14 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
   const vaultDataDir = resolveDataDir(vaultPath);
   const sessionBuffer = new SessionBuffer();
 
+  function touch(...notes: string[]): Promise<void> {
+    for (const note of notes) sessionBuffer.touch(note);
+    return persistSessionBuffer(vaultDataDir, instanceId, sessionBuffer);
+  }
+
   return {
     async logTraversal(from: string, to: string) {
-      sessionBuffer.touch(from);
-      sessionBuffer.touch(to);
+      await touch(from, to);
       await appendEvent(vaultDataDir, instanceId, {
         ts: new Date().toISOString(),
         instance: instanceId,
@@ -47,8 +51,7 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     },
 
     async reinforce(from: string, to: string, boost: number = DEFAULT_REINFORCE_BOOST) {
-      sessionBuffer.touch(from);
-      sessionBuffer.touch(to);
+      await touch(from, to);
       await appendEvent(vaultDataDir, instanceId, {
         ts: new Date().toISOString(),
         instance: instanceId,
@@ -60,7 +63,7 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     },
 
     async getWeightedNeighbors(note: string, topK = 10) {
-      sessionBuffer.touch(note);
+      await touch(note);
       return getWeightedNeighbors(vaultDataDir, note, topK, vaultPath, sessionBuffer);
     },
 

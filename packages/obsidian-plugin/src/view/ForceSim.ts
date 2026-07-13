@@ -133,6 +133,8 @@ export class ForceSim {
   private edges: SimEdge[] = [];
   private maxWeight = 0;
   private degree = new Map<string, number>();
+  /** most recent lastTouched among each note's incident "neural" (usage) edges — native wikilinks don't carry recency */
+  private lastTouched = new Map<string, string>();
   private tickCallback: ((nodes: SimNode[]) => void) | null = null;
   private continuousAnimation = false;
   /** carried across setData calls so unchanged notes keep their position instead of re-exploding */
@@ -153,6 +155,11 @@ export class ForceSim {
 
   getDegree(id: string): number {
     return this.degree.get(id) ?? 0;
+  }
+
+  /** ISO timestamp of the most recent usage touch on this note, or undefined if it has none. */
+  getLastTouched(id: string): string | undefined {
+    return this.lastTouched.get(id);
   }
 
   /** Wake the simulation so it reorganizes around a change (e.g. a node drag). */
@@ -214,6 +221,15 @@ export class ForceSim {
       degree.set(target, (degree.get(target) ?? 0) + 1);
     }
     this.degree = degree;
+
+    const lastTouched = new Map<string, string>();
+    for (const e of neuralEdges) {
+      const source = e.source as string;
+      const target = e.target as string;
+      if (!lastTouched.has(source) || e.lastTouched > lastTouched.get(source)!) lastTouched.set(source, e.lastTouched);
+      if (!lastTouched.has(target) || e.lastTouched > lastTouched.get(target)!) lastTouched.set(target, e.lastTouched);
+    }
+    this.lastTouched = lastTouched;
 
     this.simulation?.stop();
     this.simulation = forceSimulation(nodes)

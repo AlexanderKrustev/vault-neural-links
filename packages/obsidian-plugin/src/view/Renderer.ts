@@ -73,6 +73,7 @@ export class Renderer {
   private panY = 0;
   private gradient = WEIGHT_GRADIENTS.default;
   private edgeMaxAgeDays = DEFAULT_EDGE_MAX_AGE_DAYS;
+  private primedNotes: ReadonlySet<string> = new Set();
 
   // drag state: either panning the canvas or dragging a single node
   private dragNode: SimNode | null = null;
@@ -117,6 +118,10 @@ export class Renderer {
 
   setEdgeMaxAgeDays(days: number): void {
     this.edgeMaxAgeDays = days;
+  }
+
+  setPrimedNotes(notes: ReadonlySet<string>): void {
+    this.primedNotes = notes;
   }
 
   start(): void {
@@ -262,10 +267,26 @@ export class Renderer {
       const isHovered = this.hoveredNode === node;
       const radius = nodeRadius(this.sim.getDegree(node.id));
 
+      const nodeLastTouched = this.sim.getLastTouched(node.id);
+      const nodeAgeDays = nodeLastTouched ? (Date.now() - Date.parse(nodeLastTouched)) / 86_400_000 : Infinity;
+      const nodeFreshness = Math.max(0, 1 - nodeAgeDays / this.edgeMaxAgeDays);
+      const nodeAlpha = Math.min(1, 0.35 + nodeFreshness * 0.65);
+
       ctx.beginPath();
       ctx.arc(node.x, node.y, isHovered ? radius * 1.2 : radius, 0, Math.PI * 2);
-      ctx.fillStyle = isHovered ? "rgba(255, 200, 80, 0.95)" : "rgba(220, 220, 230, 0.9)";
+      ctx.fillStyle = isHovered ? "rgba(255, 200, 80, 0.95)" : `rgba(220, 220, 230, ${nodeAlpha})`;
       ctx.fill();
+
+      if (this.primedNotes.has(node.id)) {
+        ctx.save();
+        ctx.setLineDash([4 / this.scale, 3 / this.scale]);
+        ctx.lineWidth = 1.5 / this.scale;
+        ctx.strokeStyle = "rgba(255, 170, 60, 0.9)";
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + 4 / this.scale, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
 
       if (isHovered) {
         const title = node.id.split("/").pop() ?? node.id;
