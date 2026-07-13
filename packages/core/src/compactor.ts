@@ -4,9 +4,21 @@ import { randomUUID } from "node:crypto";
 import type { CompactionResult, EdgeRecord, EventLogEntry, LinkWeightsFile } from "./types.js";
 
 const WEIGHTS_FILE_VERSION = 1;
+// Generous upper bound on how long reactivationDays needs to remember —
+// must comfortably cover any realistic ConsolidationConfig.windowDays.
+const REACTIVATION_RETENTION_DAYS = 90;
 
 function edgeKey(a: string, b: string): string {
   return [a, b].sort().join("|");
+}
+
+/** UTC calendar-day key ("YYYY-MM-DD") for an event timestamp. */
+function dayKey(ts: string): string {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+function daysSinceDayKey(day: string, now: Date): number {
+  return (now.getTime() - new Date(`${day}T00:00:00.000Z`).getTime()) / 86_400_000;
 }
 
 async function readAllEvents(
@@ -63,15 +75,23 @@ export async function compact(vaultDataDir: string): Promise<CompactionResult> {
   if (existing) {
     for (const [key, record] of Object.entries(existing.edges)) {
       // Migrate pre-existing files written before the weight -> baseStrength
-      // rename: an edge untouched by any event since the rename would
-      // otherwise keep its old `weight` field forever, and every reader now
-      // expects `baseStrength`.
-      const legacy = record as unknown as { weight?: number; baseStrength?: number };
+      // rename, and before reactivationDays/consolidatedScore existed at
+      // all: an edge untouched by any event since either change would
+      // otherwise keep missing fields forever, and every reader now expects
+      // the full current shape.
+      const legacy = record as unknown as {
+        weight?: number;
+        baseStrength?: number;
+        reactivationDays?: string[];
+        consolidatedScore?: number;
+      };
       edges.set(key, {
         baseStrength: legacy.baseStrength ?? legacy.weight ?? 0,
         lastTouched: record.lastTouched,
         traverseCount: record.traverseCount,
         reinforceCount: record.reinforceCount,
+        reactivationDays: legacy.reactivationDays ?? [],
+        consolidatedScore: legacy.consolidatedScore ?? 0,
       });
     }
   }
@@ -86,6 +106,8 @@ export async function compact(vaultDataDir: string): Promise<CompactionResult> {
       lastTouched: entry.ts,
       traverseCount: 0,
       reinforceCount: 0,
+      reactivationDays: [],
+      consolidatedScore: 0,
     };
 
     record.baseStrength += entry.weight_delta;
@@ -95,7 +117,20 @@ export async function compact(vaultDataDir: string): Promise<CompactionResult> {
     if (entry.type === "traverse") record.traverseCount += 1;
     if (entry.type === "reinforce") record.reinforceCount += 1;
 
+    const day = dayKey(entry.ts);
+    if (!record.reactivationDays.includes(day)) record.reactivationDays.push(day);
+
     edges.set(key, record);
+  }
+
+  // reactivationDays only needs to outlive the widest realistic consolidation
+  // window; pruning here (rather than only at nightly-consolidation time)
+  // keeps the array from growing unbounded for edges reactivated daily over
+  // months or years.
+  for (const record of edges.values()) {
+    record.reactivationDays = record.reactivationDays.filter(
+      (day) => daysSinceDayKey(day, compactedAt) <= REACTIVATION_RETENTION_DAYS,
+    );
   }
 
   const payload: LinkWeightsFile = {

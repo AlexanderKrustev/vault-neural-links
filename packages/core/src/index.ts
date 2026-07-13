@@ -12,6 +12,7 @@ export * from "./decay.js";
 export * from "./priming.js";
 export { appendEvent } from "./logger.js";
 export { compact } from "./compactor.js";
+export { consolidate, runNightlyConsolidation } from "./consolidation.js";
 export { getWeightedNeighbors, getEdgeWeight } from "./query.js";
 export { resolveDataDir } from "./vaultPaths.js";
 export * from "./frontmatter.js";

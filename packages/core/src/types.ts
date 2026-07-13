@@ -10,11 +10,15 @@ export interface EventLogEntry {
 }
 
 export interface EdgeRecord {
-  /** Raw accumulated weight from events, undecayed — decay is applied live at query time. */
+  /** Raw accumulated weight from events, undecayed — decay is applied live at query time. Fast-decaying "recent" tier. */
   baseStrength: number;
   lastTouched: string;
   traverseCount: number;
   reinforceCount: number;
+  /** Distinct "YYYY-MM-DD" calendar days this edge was reactivated (traverse/reinforce), used to detect repeated reactivation for consolidation promotion. Pruned to a generous retention window during compaction. */
+  reactivationDays: string[];
+  /** Long-term tier promoted by the nightly consolidation job once reactivationDays crosses its threshold — added undecayed to live weight, so consolidated edges resist the recent tier's decay entirely. */
+  consolidatedScore: number;
 }
 
 export interface LinkWeightsFile {
@@ -88,4 +92,29 @@ export interface SessionBufferFile {
   instance: string;
   updatedAt: string;
   notes: string[];
+}
+
+
+/**
+ * Controls promotion into the long-term "consolidated" tier: an edge is
+ * promoted once it's been reactivated on at least `reactivationThreshold`
+ * distinct days within the trailing `windowDays` — modeling spaced
+ * repetition rather than a single burst of activity.
+ */
+export interface ConsolidationConfig {
+  reactivationThreshold: number;
+  windowDays: number;
+  promotionIncrement: number;
+}
+
+export const DEFAULT_CONSOLIDATION_CONFIG: ConsolidationConfig = {
+  reactivationThreshold: 3,
+  windowDays: 7,
+  promotionIncrement: 1,
+};
+
+export interface ConsolidationResult {
+  edgeCount: number;
+  promotedCount: number;
+  consolidatedAt: string;
 }

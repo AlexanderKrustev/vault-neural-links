@@ -19,11 +19,14 @@ import type { LinkWeightsFile } from "@vault-neural-links/core";
 // instead of per-note-type tau.
 const DEFAULT_HALF_LIFE_DAYS = 30;
 
-function liveWeight(baseStrength: number, lastTouched: string): number {
+function liveWeight(baseStrength: number, lastTouched: string, consolidatedScore = 0): number {
   const daysSince = (Date.now() - new Date(lastTouched).getTime()) / (1000 * 60 * 60 * 24);
-  if (daysSince <= 0) return baseStrength;
+  // consolidatedScore is added undecayed — same rule as query.ts's liveWeight
+  // — so a long-term "consolidated" edge doesn't fade even though its
+  // recent-tier baseStrength still does.
+  if (daysSince <= 0) return baseStrength + consolidatedScore;
   const lambda = Math.LN2 / DEFAULT_HALF_LIFE_DAYS;
-  return baseStrength * Math.exp(-lambda * daysSince);
+  return baseStrength * Math.exp(-lambda * daysSince) + consolidatedScore;
 }
 
 export interface SimNode {
@@ -183,7 +186,7 @@ export class ForceSim {
     const ids = new Set(notePaths);
     const neuralEdges: SimEdge[] = [];
     for (const [key, record] of Object.entries(weights.edges)) {
-      const weight = liveWeight(record.baseStrength, record.lastTouched);
+      const weight = liveWeight(record.baseStrength, record.lastTouched, record.consolidatedScore);
       if (weight < minWeight) continue;
       const [source, target] = key.split("|");
       if (source === undefined || target === undefined) continue;

@@ -107,6 +107,49 @@ describe("logger + compactor + query pipeline", () => {
 });
 
 
+describe("reactivation-day tracking", () => {
+  let dataDir: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-reactivation-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("records a distinct calendar day per compaction and dedupes same-day events", async () => {
+    const day1 = new Date("2026-07-10T09:00:00.000Z").toISOString();
+    const day1Later = new Date("2026-07-10T18:00:00.000Z").toISOString();
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", ts: day1 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", ts: day1Later }));
+    await compact(dataDir);
+
+    const day2 = new Date("2026-07-11T09:00:00.000Z").toISOString();
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", ts: day2 }));
+    await compact(dataDir);
+
+    const raw = JSON.parse(await readFile(join(dataDir, "link-weights.json"), "utf8"));
+    expect(raw.edges["A|B"].reactivationDays).toEqual(["2026-07-10", "2026-07-11"]);
+  });
+
+  it("adds consolidatedScore undecayed to the live weight even for a stale edge", async () => {
+    const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", ts: old, weight_delta: 10 }));
+    await compact(dataDir);
+
+    const withoutConsolidation = await getEdgeWeight(dataDir, "A", "B");
+
+    const raw = JSON.parse(await readFile(join(dataDir, "link-weights.json"), "utf8"));
+    raw.edges["A|B"].consolidatedScore = 50;
+    await writeFile(join(dataDir, "link-weights.json"), JSON.stringify(raw), "utf8");
+
+    const withConsolidation = await getEdgeWeight(dataDir, "A", "B");
+    expect(withConsolidation).toBeCloseTo(withoutConsolidation! + 50, 5);
+  });
+});
+
+
 describe("legacy weight field migration", () => {
   let dataDir: string;
 
@@ -136,6 +179,8 @@ describe("legacy weight field migration", () => {
     const raw = JSON.parse(await readFile(join(dataDir, "link-weights.json"), "utf8"));
     expect(raw.edges["A|B"].baseStrength).toBeCloseTo(7, 5);
     expect(raw.edges["A|B"].weight).toBeUndefined();
+    expect(raw.edges["A|B"].reactivationDays).toEqual([]);
+    expect(raw.edges["A|B"].consolidatedScore).toBe(0);
   });
 });
 

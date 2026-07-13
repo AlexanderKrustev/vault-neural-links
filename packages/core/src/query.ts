@@ -47,7 +47,10 @@ async function liveWeight(
 ): Promise<number> {
   const noteType = vaultPath ? await readNoteType(vaultPath, notePath) : undefined;
   const halfLifeDays = resolveHalfLifeDays(noteType, decayConfig);
-  return decayWeight(record.baseStrength, daysSince(record.lastTouched, now), { halfLifeDays });
+  // consolidatedScore is added undecayed — that's the whole point of the
+  // long-term tier: once promoted, it resists the recent tier's decay
+  // entirely rather than just decaying more slowly.
+  return decayWeight(record.baseStrength, daysSince(record.lastTouched, now), { halfLifeDays }) + record.consolidatedScore;
 }
 
 /**
