@@ -78,4 +78,14 @@ describe("notes", () => {
     const byContent = await searchNotes(vaultPath, "somewhere", { useWeights: false });
     expect(byContent.map((h) => h.path)).toEqual(["Third"]);
   });
+
+  it("searchNotes flags a superseded hit with its successor, matched by title alone", async () => {
+    await writeNote(vaultPath, "Old ADR", {
+      frontmatter: { status: "superseded", superseded_by: "[[New ADR]]" },
+      body: "old decision",
+    });
+
+    const hits = await searchNotes(vaultPath, "Old ADR", { useWeights: false });
+    expect(hits.find((h) => h.path === "Old ADR")!.supersededBy).toBe("New ADR");
+  });
 });

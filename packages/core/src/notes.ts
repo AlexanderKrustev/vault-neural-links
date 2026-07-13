@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { parseFrontmatter, serializeNote, type ParsedNote } from "./frontmatter.js";
 import { getWeightedNeighbors } from "./query.js";
+import { readSupersession } from "./relations.js";
 
 export interface NoteRef {
   path: string; // vault-relative, without .md extension
@@ -140,6 +141,8 @@ export interface SearchHit {
   path: string;
   matched: "title" | "alias" | "content";
   weight?: number;
+  /** Set when this note's frontmatter marks it `status: superseded` — see relations.ts. */
+  supersededBy?: string;
 }
 
 /**
@@ -192,5 +195,16 @@ export async function searchNotes(
     hits.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
   }
 
-  return hits.slice(0, topK);
+  const topHits = hits.slice(0, topK);
+
+  // Only checked for the final topK slice — a note's usage weight/recency
+  // gives no hint it's outdated, so this signal has to be looked up
+  // regardless of match kind or ranking.
+  await Promise.all(
+    topHits.map(async (hit) => {
+      hit.supersededBy = await readSupersession(vaultPath, hit.path);
+    }),
+  );
+
+  return topHits;
 }

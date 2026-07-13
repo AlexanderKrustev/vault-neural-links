@@ -31,6 +31,8 @@ export interface WeightedNeighbor {
   path: string;
   weight: number;
   lastTouched: string;
+  /** Set when this note's frontmatter marks it `status: superseded` — surfaces its successor even though its usage weight/recency gives no hint it's outdated. */
+  supersededBy?: string;
 }
 
 export interface CompactionResult {

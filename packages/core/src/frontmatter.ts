@@ -97,6 +97,10 @@ export function stringifyFrontmatter(frontmatter: Record<string, unknown>): stri
 
 function stringifyValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stringifyArrayItem).join(", ")}]`;
+  // A string starting with "[" (e.g. a wikilink "[[Target]]") would otherwise
+  // round-trip as a one-element array on the next parse, since the parser
+  // has no other way to tell a literal array from a bracketed string.
+  if (typeof value === "string" && value.startsWith("[")) return `"${value}"`;
   return String(value);
 }
 

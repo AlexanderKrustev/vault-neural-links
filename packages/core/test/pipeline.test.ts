@@ -150,6 +150,55 @@ describe("reactivation-day tracking", () => {
 });
 
 
+describe("supersession surfacing in getWeightedNeighbors", () => {
+  let dataDir: string;
+  let vaultPath: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-supersede-data-"));
+    vaultPath = await mkdtemp(join(tmpdir(), "vnl-test-supersede-vault-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(vaultPath, { recursive: true, force: true });
+  });
+
+  it("flags a fresh, heavily-weighted neighbor that is marked superseded", async () => {
+    await writeFile(
+      join(vaultPath, "Old ADR.md"),
+      '---\nstatus: superseded\nsuperseded_by: "[[New ADR]]"\n---\nbody',
+      "utf8",
+    );
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "Old ADR", weight_delta: 10 }));
+    await compact(dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    const oldAdr = neighbors.find((n) => n.path === "Old ADR")!;
+    expect(oldAdr.supersededBy).toBe("New ADR");
+    // Still fresh/heavily-weighted despite being outdated — recency alone wouldn't have flagged it.
+    expect(oldAdr.weight).toBeGreaterThan(0);
+  });
+
+  it("does not set supersededBy for a note without that frontmatter", async () => {
+    await writeFile(join(vaultPath, "Current.md"), "---\nstatus: active\n---\nbody", "utf8");
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "Current", weight_delta: 10 }));
+    await compact(dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    expect(neighbors.find((n) => n.path === "Current")!.supersededBy).toBeUndefined();
+  });
+
+  it("does not check supersession when no vaultPath is given", async () => {
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 10 }));
+    await compact(dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A");
+    expect(neighbors[0].supersededBy).toBeUndefined();
+  });
+});
+
+
 describe("legacy weight field migration", () => {
   let dataDir: string;
 

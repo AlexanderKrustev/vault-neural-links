@@ -37,4 +37,11 @@ describe("frontmatter", () => {
     const result = stringifyFrontmatter({ aliases: ["Smith, John"] });
     expect(result).toContain('aliases: ["Smith, John"]');
   });
+
+  it("round-trips a wikilink-shaped string value instead of misparsing it as an array", () => {
+    const serialized = serializeNote({ frontmatter: { superseded_by: "[[New Note]]" }, body: "" });
+    const { frontmatter } = parseFrontmatter(serialized);
+
+    expect(frontmatter.superseded_by).toBe("[[New Note]]");
+  });
 });

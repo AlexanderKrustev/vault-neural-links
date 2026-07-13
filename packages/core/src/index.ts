@@ -13,6 +13,7 @@ export * from "./priming.js";
 export { appendEvent } from "./logger.js";
 export { compact } from "./compactor.js";
 export { consolidate, runNightlyConsolidation } from "./consolidation.js";
+export { resolveSupersededBy, readSupersession } from "./relations.js";
 export { getWeightedNeighbors, getEdgeWeight } from "./query.js";
 export { resolveDataDir } from "./vaultPaths.js";
 export * from "./frontmatter.js";

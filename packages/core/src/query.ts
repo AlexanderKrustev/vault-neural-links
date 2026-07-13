@@ -4,6 +4,7 @@ import type { EdgeRecord, LinkWeightsFile, NoteTypeDecayConfig, WeightedNeighbor
 import { decayWeight, resolveHalfLifeDays } from "./decay.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { primingBonus, type SessionBuffer } from "./priming.js";
+import { readSupersession } from "./relations.js";
 
 async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null> {
   try {
@@ -79,7 +80,20 @@ export async function getWeightedNeighbors(
   }
 
   neighbors.sort((x, y) => y.weight - x.weight);
-  return neighbors.slice(0, topK);
+  const topNeighbors = neighbors.slice(0, topK);
+
+  // Only checked for the final topK slice, not every candidate edge — a
+  // note's usage weight/recency gives no hint it's outdated, so this is the
+  // one signal that has to be looked up regardless of how fresh the edge is.
+  if (vaultPath) {
+    await Promise.all(
+      topNeighbors.map(async (neighbor) => {
+        neighbor.supersededBy = await readSupersession(vaultPath, neighbor.path);
+      }),
+    );
+  }
+
+  return topNeighbors;
 }
 
 export async function getEdgeWeight(
