@@ -134,14 +134,23 @@ export interface SpreadingActivationConfig {
   energyEdgeWeightDecayPerHop: number;
   /** Hard cap on hops from the origin note (bounded to 2-3 per the design — unbounded spread would turn a local query into a full-graph walk). */
   maxHops: number;
-  /** Energy below this stops both further propagation from a node and inclusion of that node in results. */
+  /** Energy below this stops both further propagation from a node and inclusion of that node in results. Applied to usage-weighted edges. */
   minThreshold: number;
+  /**
+   * Same cutoff as `minThreshold` but applied to structural-only (floor-weight,
+   * no-usage-history) edges. A note with many wikilinks splits the same starting
+   * energy across every neighbor, so any fan-out past a handful of edges pushes
+   * each share under a threshold tuned for usage edges and silently kills
+   * propagation — this tier gets its own, more forgiving cutoff instead.
+   */
+  structuralMinThreshold: number;
 }
 
 export const DEFAULT_SPREADING_ACTIVATION_CONFIG: SpreadingActivationConfig = {
   energyEdgeWeightDecayPerHop: 0.5,
   maxHops: 3,
   minThreshold: 0.5,
+  structuralMinThreshold: 0.05,
 };
 
 export interface ActivatedNote {

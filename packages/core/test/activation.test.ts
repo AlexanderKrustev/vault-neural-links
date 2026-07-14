@@ -6,6 +6,7 @@ import { appendEvent } from "../src/logger.js";
 import { compact } from "../src/compactor.js";
 import { activate } from "../src/activation.js";
 import { rebuildStructuralIndex } from "../src/structuralLinks.js";
+import { DEFAULT_SPREADING_ACTIVATION_CONFIG } from "../src/types.js";
 import type { ActivationTraceEvent, EventLogEntry } from "../src/types.js";
 
 function event(overrides: Partial<EventLogEntry>): EventLogEntry {
@@ -64,7 +65,7 @@ describe("activate (spreading activation)", () => {
 
     // Tiny starting energy plus aggressive per-hop decay means even the
     // direct neighbor should fall under a high threshold.
-    const result = await activate(dataDir, "A", 1, { energyEdgeWeightDecayPerHop: 0.1, maxHops: 3, minThreshold: 5 });
+    const result = await activate(dataDir, "A", 1, { energyEdgeWeightDecayPerHop: 0.1, maxHops: 3, minThreshold: 5, structuralMinThreshold: 5 });
     expect(result).toEqual([]);
   });
 
@@ -74,7 +75,12 @@ describe("activate (spreading activation)", () => {
     await appendEvent(dataDir, "inst-1", event({ from: "C", to: "D", weight_delta: 10 }));
     await compact(dataDir);
 
-    const result = await activate(dataDir, "A", 10, { energyEdgeWeightDecayPerHop: 0.9, maxHops: 1, minThreshold: 0.001 });
+    const result = await activate(dataDir, "A", 10, {
+      energyEdgeWeightDecayPerHop: 0.9,
+      maxHops: 1,
+      minThreshold: 0.001,
+      structuralMinThreshold: 0.001,
+    });
     expect(result.map((n) => n.path)).toEqual(["B"]);
   });
 
@@ -87,7 +93,12 @@ describe("activate (spreading activation)", () => {
     await appendEvent(dataDir, "inst-1", event({ from: "C", to: "D", weight_delta: 10 }));
     await compact(dataDir);
 
-    const viaOnePath = await activate(dataDir, "A", 10, { energyEdgeWeightDecayPerHop: 0.9, maxHops: 2, minThreshold: 0.001 });
+    const viaOnePath = await activate(dataDir, "A", 10, {
+      energyEdgeWeightDecayPerHop: 0.9,
+      maxHops: 2,
+      minThreshold: 0.001,
+      structuralMinThreshold: 0.001,
+    });
     const d = viaOnePath.find((n) => n.path === "D")!;
 
     // Remove one of the two paths and compare — D should get strictly less
@@ -100,6 +111,7 @@ describe("activate (spreading activation)", () => {
       energyEdgeWeightDecayPerHop: 0.9,
       maxHops: 2,
       minThreshold: 0.001,
+      structuralMinThreshold: 0.001,
     });
     const dSingle = viaSinglePath.find((n) => n.path === "D")!;
 
@@ -129,14 +141,47 @@ describe("activate (spreading activation)", () => {
     await rm(vaultPath, { recursive: true, force: true });
   });
 
+  it("uses the more forgiving structuralMinThreshold when usage-edge fan-out would starve a structural edge", async () => {
+    // 10 structural-only neighbors split the origin's energy into shares too
+    // small to clear the usage-edge minThreshold (0.5) but large enough to
+    // clear the dedicated structuralMinThreshold (0.05).
+    const vaultPath = await mkdtemp(join(tmpdir(), "vnl-test-activation-fanout-"));
+    const links = Array.from({ length: 10 }, (_, i) => `[[N${i}]]`).join(" ");
+    await writeFile(join(vaultPath, "A.md"), links, "utf8");
+    for (let i = 0; i < 10; i++) {
+      await writeFile(join(vaultPath, `N${i}.md`), "body", "utf8");
+    }
+    await rebuildStructuralIndex(vaultPath, dataDir);
+
+    const result = await activate(dataDir, "A", 2, undefined, vaultPath);
+    expect(result).toHaveLength(10);
+
+    const excluded = await activate(
+      dataDir,
+      "A",
+      2,
+      { ...DEFAULT_SPREADING_ACTIVATION_CONFIG, structuralMinThreshold: 0.5 },
+      vaultPath,
+    );
+    expect(excluded).toEqual([]);
+
+    await rm(vaultPath, { recursive: true, force: true });
+  });
+
   it("emits ordered edge_traversed/node_activated events with a stable runId", async () => {
     await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 10 }));
     await appendEvent(dataDir, "inst-1", event({ from: "B", to: "C", weight_delta: 10 }));
     await compact(dataDir);
 
     const events: ActivationTraceEvent[] = [];
-    await activate(dataDir, "A", 10, { energyEdgeWeightDecayPerHop: 0.9, maxHops: 2, minThreshold: 0.001 }, undefined, undefined, (e) =>
-      events.push(e),
+    await activate(
+      dataDir,
+      "A",
+      10,
+      { energyEdgeWeightDecayPerHop: 0.9, maxHops: 2, minThreshold: 0.001, structuralMinThreshold: 0.001 },
+      undefined,
+      undefined,
+      (e) => events.push(e),
     );
 
     expect(events.map((e) => e.type)).toEqual(["edge_traversed", "node_activated", "edge_traversed", "node_activated"]);

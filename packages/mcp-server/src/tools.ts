@@ -63,7 +63,12 @@ export const activateTool = {
       note: z.string().describe("Vault-relative note path, without .md extension"),
       energy: z.number().positive().optional().describe("Starting energy at the origin note (default 10)"),
       maxHops: z.number().int().positive().max(3).optional().describe("Max hops from the origin note (default 3)"),
-      minThreshold: z.number().positive().optional().describe("Energy cutoff below which propagation/inclusion stops (default 0.5)"),
+      minThreshold: z.number().positive().optional().describe("Energy cutoff below which propagation/inclusion stops for usage-weighted edges (default 0.5)"),
+      structuralMinThreshold: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Energy cutoff below which propagation/inclusion stops for structural-only (floor-weight) edges (default 0.05)"),
     },
   },
   handler:
@@ -73,15 +78,22 @@ export const activateTool = {
       energy,
       maxHops,
       minThreshold,
+      structuralMinThreshold,
     }: {
       note: string;
       energy?: number;
       maxHops?: number;
       minThreshold?: number;
+      structuralMinThreshold?: number;
     }) => {
       const config =
-        maxHops !== undefined || minThreshold !== undefined
-          ? { ...DEFAULT_SPREADING_ACTIVATION_CONFIG, ...(maxHops !== undefined && { maxHops }), ...(minThreshold !== undefined && { minThreshold }) }
+        maxHops !== undefined || minThreshold !== undefined || structuralMinThreshold !== undefined
+          ? {
+              ...DEFAULT_SPREADING_ACTIVATION_CONFIG,
+              ...(maxHops !== undefined && { maxHops }),
+              ...(minThreshold !== undefined && { minThreshold }),
+              ...(structuralMinThreshold !== undefined && { structuralMinThreshold }),
+            }
           : undefined;
 
       // `trace` is Claude's own audit trail of the retrieval path,

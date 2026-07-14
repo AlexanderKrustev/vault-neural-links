@@ -40,7 +40,7 @@ export async function activate(
   const runId = randomUUID();
 
   async function spread(current: string, currentEnergy: number, hop: number, visited: Set<string>): Promise<void> {
-    if (hop > config.maxHops || currentEnergy < config.minThreshold) return;
+    if (hop > config.maxHops || currentEnergy < config.structuralMinThreshold) return;
 
     const neighbors = await computeLiveNeighborWeights(vaultDataDir, current, vaultPath, sessionBuffer);
     const totalWeight = neighbors.reduce((sum, n) => sum + Math.max(n.weight, 0), 0);
@@ -51,7 +51,8 @@ export async function activate(
 
       const share = neighbor.weight / totalWeight;
       const transferred = currentEnergy * config.energyEdgeWeightDecayPerHop * share;
-      if (transferred < config.minThreshold) continue;
+      const threshold = neighbor.source === "structural" ? config.structuralMinThreshold : config.minThreshold;
+      if (transferred < threshold) continue;
 
       onEvent?.({
         type: "edge_traversed",
