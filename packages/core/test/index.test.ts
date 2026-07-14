@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { initInstance } from "../src/index.js";
 import { appendEvent } from "../src/logger.js";
 import { sessionBufferFilePath } from "../src/priming.js";
-import type { EventLogEntry, SessionBufferFile } from "../src/types.js";
+import type { ActivationTraceEvent, EventLogEntry, SessionBufferFile } from "../src/types.js";
 
 function event(overrides: Partial<EventLogEntry>): EventLogEntry {
   return {
@@ -69,6 +69,43 @@ describe("initInstance", () => {
     const b = neighbors.find((n) => n.path === "B")!;
     const c = neighbors.find((n) => n.path === "C")!;
     expect(b.weight).toBeGreaterThan(c.weight);
+  });
+
+  it("emits an edge_traversed event on logTraversal and reinforce, not just activate", async () => {
+    const client = initInstance(vaultPath, "test-instance");
+    const events: ActivationTraceEvent[] = [];
+
+    await client.logTraversal("A", "B", (e) => events.push(e));
+    await client.reinforce("A", "B", 7, (e) => events.push(e));
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ type: "edge_traversed", from: "A", to: "B", energy: 1 });
+    expect(events[1]).toMatchObject({ type: "edge_traversed", from: "A", to: "B", energy: 7 });
+  });
+
+  it("emits an edge_traversed event per changed edge on compact", async () => {
+    const client = initInstance(vaultPath, "test-instance");
+    await client.logTraversal("A", "B");
+    await client.logTraversal("C", "D");
+
+    const events: ActivationTraceEvent[] = [];
+    await client.compact((e) => events.push(e));
+
+    expect(events).toHaveLength(2);
+    const pairs = events.map((e) => [e.from, e.to].sort());
+    expect(pairs).toContainEqual(["A", "B"]);
+    expect(pairs).toContainEqual(["C", "D"]);
+  });
+
+  it("does not re-emit compact events for edges unchanged since the last compaction", async () => {
+    const client = initInstance(vaultPath, "test-instance");
+    await client.logTraversal("A", "B");
+    await client.compact();
+
+    const events: ActivationTraceEvent[] = [];
+    await client.compact((e) => events.push(e));
+
+    expect(events).toHaveLength(0);
   });
 
   it("persists the session buffer to disk so out-of-process consumers can read it", async () => {

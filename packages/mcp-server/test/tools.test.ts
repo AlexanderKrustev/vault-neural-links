@@ -141,10 +141,35 @@ describe("mcp-server tools", () => {
 
     await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
     await compactWeightsTool.handler(ctx)({});
+    broadcast.mockClear(); // isolate activate's own broadcasts from reinforce/compact's
 
     const { trace } = parseResult(await activateTool.handler(ctx)({ note: "A" }));
     expect(broadcast).toHaveBeenCalledTimes(trace.length);
     expect(broadcast.mock.calls[0][0]).toEqual(trace[0]);
+  });
+
+  it("log_traversal and reinforce_link each broadcast an edge_traversed event live", async () => {
+    const broadcast = vi.fn();
+    ctx.activationSocket = { port: 0, broadcast, close: async () => {} };
+
+    await logTraversalTool.handler(ctx)({ from: "A", to: "B" });
+    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 3 });
+
+    expect(broadcast).toHaveBeenCalledTimes(2);
+    expect(broadcast.mock.calls[0][0]).toMatchObject({ type: "edge_traversed", from: "A", to: "B", energy: 1 });
+    expect(broadcast.mock.calls[1][0]).toMatchObject({ type: "edge_traversed", from: "A", to: "B", energy: 3 });
+  });
+
+  it("compact_weights broadcasts an edge_traversed event for every edge changed since the last compaction", async () => {
+    const broadcast = vi.fn();
+    ctx.activationSocket = { port: 0, broadcast, close: async () => {} };
+
+    await logTraversalTool.handler(ctx)({ from: "A", to: "B" });
+    broadcast.mockClear(); // isolate compact_weights' own broadcasts from log_traversal's
+
+    await compactWeightsTool.handler(ctx)({});
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(broadcast.mock.calls[0][0]).toMatchObject({ type: "edge_traversed", from: "A", to: "B" });
   });
 
   it("create_note writes a note and reports autoLinked, then errors on a duplicate create", async () => {

@@ -1,7 +1,13 @@
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { CompactionResult, EdgeRecord, EventLogEntry, LinkWeightsFile } from "./types.js";
+import type {
+  ActivationEventSink,
+  CompactionResult,
+  EdgeRecord,
+  EventLogEntry,
+  LinkWeightsFile,
+} from "./types.js";
 
 const WEIGHTS_FILE_VERSION = 1;
 // Generous upper bound on how long reactivationDays needs to remember —
@@ -62,7 +68,7 @@ async function readExistingWeights(weightsFilePath: string): Promise<LinkWeights
  * once their contents are safely folded into the weights file, so compaction
  * never loses previously-recorded edges that had no new events this round.
  */
-export async function compact(vaultDataDir: string): Promise<CompactionResult> {
+export async function compact(vaultDataDir: string, onEvent?: ActivationEventSink): Promise<CompactionResult> {
   const eventsDir = join(vaultDataDir, "events");
   const weightsFilePath = join(vaultDataDir, "link-weights.json");
 
@@ -70,6 +76,10 @@ export async function compact(vaultDataDir: string): Promise<CompactionResult> {
   const compactedAt = new Date();
 
   const edges = new Map<string, EdgeRecord>();
+  // Tracks which edges actually changed this compaction round (and by how
+  // much), so onEvent only fires for real weight changes rather than every
+  // pre-existing edge carried forward unchanged.
+  const changed = new Map<string, { from: string; to: string; delta: number }>();
 
   const existing = await readExistingWeights(weightsFilePath);
   if (existing) {
@@ -121,6 +131,13 @@ export async function compact(vaultDataDir: string): Promise<CompactionResult> {
     if (!record.reactivationDays.includes(day)) record.reactivationDays.push(day);
 
     edges.set(key, record);
+
+    const existingDelta = changed.get(key);
+    if (existingDelta) {
+      existingDelta.delta += entry.weight_delta;
+    } else {
+      changed.set(key, { from: entry.from, to: entry.to, delta: entry.weight_delta });
+    }
   }
 
   // reactivationDays only needs to outlive the widest realistic consolidation
@@ -153,6 +170,22 @@ export async function compact(vaultDataDir: string): Promise<CompactionResult> {
       }),
     ),
   );
+
+  if (onEvent && changed.size > 0) {
+    const runId = randomUUID();
+    for (const { from, to, delta } of changed.values()) {
+      onEvent({
+        type: "edge_traversed",
+        runId,
+        origin: from,
+        hop: 0,
+        from,
+        to,
+        energy: delta,
+        ts: payload.compactedAt,
+      });
+    }
+  }
 
   return { edgeCount: edges.size, compactedAt: payload.compactedAt };
 }

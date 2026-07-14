@@ -129,7 +129,7 @@ export const logTraversalTool = {
     },
   },
   handler: (ctx: ToolContext) => async ({ from, to }: { from: string; to: string }) => {
-    await ctx.client.logTraversal(from, to);
+    await ctx.client.logTraversal(from, to, (event) => ctx.activationSocket?.broadcast(event));
     return textResult({ logged: true, from, to });
   },
 };
@@ -149,7 +149,7 @@ export const reinforceLinkTool = {
     },
   },
   handler: (ctx: ToolContext) => async ({ from, to, boost }: { from: string; to: string; boost?: number }) => {
-    await ctx.client.reinforce(from, to, boost);
+    await ctx.client.reinforce(from, to, boost, (event) => ctx.activationSocket?.broadcast(event));
     return textResult({ reinforced: true, from, to, boost: boost ?? 5 });
   },
 };
@@ -165,7 +165,7 @@ export const compactWeightsTool = {
     inputSchema: {},
   },
   handler: (ctx: ToolContext) => async () => {
-    const result = await ctx.client.compact();
+    const result = await ctx.client.compact((event) => ctx.activationSocket?.broadcast(event));
     return textResult(result);
   },
 };

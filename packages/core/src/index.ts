@@ -33,8 +33,8 @@ const DEFAULT_REINFORCE_BOOST = 5;
 const DEFAULT_ACTIVATION_ENERGY = 10;
 
 export interface VaultLinkClient {
-  logTraversal(from: string, to: string): Promise<void>;
-  reinforce(from: string, to: string, boost?: number): Promise<void>;
+  logTraversal(from: string, to: string, onEvent?: ActivationEventSink): Promise<void>;
+  reinforce(from: string, to: string, boost?: number, onEvent?: ActivationEventSink): Promise<void>;
   getWeightedNeighbors(note: string, topK?: number): Promise<WeightedNeighbor[]>;
   activate(
     note: string,
@@ -42,7 +42,7 @@ export interface VaultLinkClient {
     config?: SpreadingActivationConfig,
     onEvent?: ActivationEventSink,
   ): Promise<ActivatedNote[]>;
-  compact(): Promise<CompactionResult>;
+  compact(onEvent?: ActivationEventSink): Promise<CompactionResult>;
 }
 
 export function initInstance(vaultPath: string, instanceId: string = randomUUID()): VaultLinkClient {
@@ -55,28 +55,32 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
   }
 
   return {
-    async logTraversal(from: string, to: string) {
+    async logTraversal(from: string, to: string, onEvent?: ActivationEventSink) {
       await touch(from, to);
+      const ts = new Date().toISOString();
       await appendEvent(vaultDataDir, instanceId, {
-        ts: new Date().toISOString(),
+        ts,
         instance: instanceId,
         type: "traverse",
         from,
         to,
         weight_delta: 1,
       });
+      onEvent?.({ type: "edge_traversed", runId: randomUUID(), origin: from, hop: 0, from, to, energy: 1, ts });
     },
 
-    async reinforce(from: string, to: string, boost: number = DEFAULT_REINFORCE_BOOST) {
+    async reinforce(from: string, to: string, boost: number = DEFAULT_REINFORCE_BOOST, onEvent?: ActivationEventSink) {
       await touch(from, to);
+      const ts = new Date().toISOString();
       await appendEvent(vaultDataDir, instanceId, {
-        ts: new Date().toISOString(),
+        ts,
         instance: instanceId,
         type: "reinforce",
         from,
         to,
         weight_delta: boost,
       });
+      onEvent?.({ type: "edge_traversed", runId: randomUUID(), origin: from, hop: 0, from, to, energy: boost, ts });
     },
 
     async getWeightedNeighbors(note: string, topK = 10) {
@@ -94,8 +98,8 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
       return activate(vaultDataDir, note, energy, config, vaultPath, sessionBuffer, onEvent);
     },
 
-    async compact() {
-      return compact(vaultDataDir);
+    async compact(onEvent?: ActivationEventSink) {
+      return compact(vaultDataDir, onEvent);
     },
   };
 }
