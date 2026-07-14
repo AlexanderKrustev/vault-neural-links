@@ -6,6 +6,7 @@ import { appendEvent } from "../src/logger.js";
 import { compact } from "../src/compactor.js";
 import { getEdgeWeight, getWeightedNeighbors } from "../src/query.js";
 import { rebuildStructuralIndex } from "../src/structuralLinks.js";
+import { runImportanceComputation } from "../src/importance.js";
 import type { EventLogEntry } from "../src/types.js";
 
 function event(overrides: Partial<EventLogEntry>): EventLogEntry {
@@ -323,5 +324,58 @@ describe("per-note-type decay tau at query time", () => {
 
     expect(withoutType).toBeCloseTo(5, 0); // default 30-day half-life: one half-life elapsed
     expect(withType).toBeGreaterThan(withoutType!); // moc tau (90d) decays slower over the same 30 days
+  });
+});
+
+describe("AIBRAIN-21: PageRank importance blended into retrieval weight", () => {
+  let dataDir: string;
+  let vaultPath: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-importance-data-"));
+    vaultPath = await mkdtemp(join(tmpdir(), "vnl-test-importance-vault-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(vaultPath, { recursive: true, force: true });
+  });
+
+  it("ranks an equally-weighted hub neighbor above a non-hub neighbor once importance has been computed", async () => {
+    // Hub is heavily wikilinked (by Other1/Other2/Other3); Leaf has no other incoming links.
+    await writeFile(join(vaultPath, "A.md"), "linked to [[Hub]] and [[Leaf]]", "utf8");
+    await writeFile(join(vaultPath, "Hub.md"), "body", "utf8");
+    await writeFile(join(vaultPath, "Leaf.md"), "body", "utf8");
+    await writeFile(join(vaultPath, "Other1.md"), "linked to [[Hub]]", "utf8");
+    await writeFile(join(vaultPath, "Other2.md"), "linked to [[Hub]]", "utf8");
+    await writeFile(join(vaultPath, "Other3.md"), "linked to [[Hub]]", "utf8");
+    await rebuildStructuralIndex(vaultPath, dataDir);
+    await runImportanceComputation(dataDir);
+
+    // Give both A->Hub and A->Leaf the exact same usage weight, so any
+    // ranking difference is attributable only to importance blending.
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "Hub", weight_delta: 3 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "Leaf", weight_delta: 3 }));
+    await compact(dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    const hub = neighbors.find((n) => n.path === "Hub")!;
+    const leaf = neighbors.find((n) => n.path === "Leaf")!;
+
+    expect(hub.weight).toBeGreaterThan(leaf.weight);
+    expect(neighbors[0].path).toBe("Hub");
+  });
+
+  it("leaves weights unchanged when note-importance.json hasn't been computed yet", async () => {
+    await writeFile(join(vaultPath, "A.md"), "linked to [[B]]", "utf8");
+    await writeFile(join(vaultPath, "B.md"), "body", "utf8");
+    await rebuildStructuralIndex(vaultPath, dataDir);
+    // deliberately not calling runImportanceComputation
+
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 5 }));
+    await compact(dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    expect(neighbors[0].weight).toBeCloseTo(5, 5);
   });
 });

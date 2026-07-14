@@ -23,6 +23,7 @@ export { appendEvent } from "./logger.js";
 export { compact } from "./compactor.js";
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 export { consolidate, runNightlyConsolidation } from "./consolidation.js";
+export { computePageRank, normalizeImportance, loadNoteImportance, runImportanceComputation } from "./importance.js";
 export { resolveSupersededBy, readSupersession } from "./relations.js";
 export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from "./query.js";
 export { activate } from "./activation.js";

@@ -220,6 +220,44 @@ export type ActivationEventSink = (event: ActivationTraceEvent) => void;
  * timing out) before it shows up as a bad session/demo, rather than only
  * finding out after the fact. Appended to retrieval-log.jsonl by logger.ts.
  */
+/**
+ * Controls periodic (batch, not per-query) PageRank-style importance
+ * scoring over the structural (wikilink) graph — deliberately independent
+ * of usage/decay, so a genuine hub note stays weighted even during a long
+ * stretch with no traversal/reinforce activity.
+ */
+export interface ImportanceConfig {
+  dampingFactor: number;
+  iterations: number;
+  convergenceTolerance: number;
+  /** λ in `final_score = activation_score * (1 + λ * importance)` — blend strength; higher values let hub notes swing retrieval order more. */
+  blendLambda: number;
+}
+
+export const DEFAULT_IMPORTANCE_CONFIG: ImportanceConfig = {
+  dampingFactor: 0.85,
+  iterations: 50,
+  convergenceTolerance: 1e-6,
+  blendLambda: 0.5,
+};
+
+/**
+ * Persisted, min-max-normalized PageRank-style importance per note (see
+ * importance.ts) — the most-linked note in the vault scores 1.0, a leaf
+ * note scores 0. Recomputed periodically (see bin/vnl-nightly.js), read at
+ * query time rather than computed live.
+ */
+export interface NoteImportanceFile {
+  version: number;
+  computedAt: string;
+  scores: Record<string, number>;
+}
+
+export interface ImportanceResult {
+  noteCount: number;
+  computedAt: string;
+}
+
 export interface RetrievalLogEntry {
   ts: string;
   instance: string;

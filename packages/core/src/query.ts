@@ -2,14 +2,16 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   EdgeRecord,
+  ImportanceConfig,
   LinkWeightsFile,
   NoteTypeDecayConfig,
   StructuralFallbackConfig,
   WeightedNeighbor,
 } from "./types.js";
-import { DEFAULT_STRUCTURAL_FALLBACK_CONFIG } from "./types.js";
+import { DEFAULT_IMPORTANCE_CONFIG, DEFAULT_STRUCTURAL_FALLBACK_CONFIG } from "./types.js";
 import { decayWeight, resolveHalfLifeDays } from "./decay.js";
 import { parseFrontmatter } from "./frontmatter.js";
+import { loadNoteImportance } from "./importance.js";
 import { primingBonus, type SessionBuffer } from "./priming.js";
 import { readSupersession } from "./relations.js";
 import { loadStructuralIndex } from "./structuralLinks.js";
@@ -79,11 +81,23 @@ export async function computeLiveNeighborWeights(
   vaultPath?: string,
   sessionBuffer?: SessionBuffer,
   structuralFallback: StructuralFallbackConfig = DEFAULT_STRUCTURAL_FALLBACK_CONFIG,
+  importanceConfig: ImportanceConfig = DEFAULT_IMPORTANCE_CONFIG,
 ): Promise<WeightedNeighbor[]> {
   const weights = await loadWeights(vaultDataDir);
+  const importance = await loadNoteImportance(vaultDataDir);
   const now = new Date();
   const neighbors: WeightedNeighbor[] = [];
   const seen = new Set<string>();
+
+  // AIBRAIN-21: final_score = activation_score * (1 + λ * importance) — a
+  // neighbor's own PageRank-style hub score boosts its weight regardless of
+  // usage recency, so a genuine hub note stays weighted even during a long
+  // stretch with no traversal/reinforce activity. No-op (multiplier of 1)
+  // until runImportanceComputation has actually populated note-importance.json.
+  function withImportance(path: string, weight: number): number {
+    const score = importance?.scores[path] ?? 0;
+    return weight * (1 + importanceConfig.blendLambda * score);
+  }
 
   if (weights) {
     for (const [key, record] of Object.entries(weights.edges)) {
@@ -92,7 +106,7 @@ export async function computeLiveNeighborWeights(
       if (other === undefined) continue;
       const baseWeight = await liveWeight(vaultPath, other, record, now);
       const weight = sessionBuffer ? baseWeight + primingBonus(other, sessionBuffer) : baseWeight;
-      neighbors.push({ path: other, weight, lastTouched: record.lastTouched, source: "usage" });
+      neighbors.push({ path: other, weight: withImportance(other, weight), lastTouched: record.lastTouched, source: "usage" });
       seen.add(other);
     }
   }
@@ -107,7 +121,7 @@ export async function computeLiveNeighborWeights(
     const weight = sessionBuffer
       ? structuralFallback.floorWeight + primingBonus(other, sessionBuffer)
       : structuralFallback.floorWeight;
-    neighbors.push({ path: other, weight, lastTouched: structural!.builtAt, source: "structural" });
+    neighbors.push({ path: other, weight: withImportance(other, weight), lastTouched: structural!.builtAt, source: "structural" });
   }
 
   return neighbors;
