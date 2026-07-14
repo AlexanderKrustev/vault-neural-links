@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { startActivationSocketServer } from "./activationSocket.js";
 import {
   activateTool,
   compactWeightsTool,
@@ -25,7 +26,16 @@ if (!vaultPath) {
   process.exit(1);
 }
 
-const ctx = makeToolContext(vaultPath, `mcp-${randomUUID()}`);
+const instanceId = `mcp-${randomUUID()}`;
+const ctx = makeToolContext(vaultPath, instanceId);
+ctx.activationSocket = await startActivationSocketServer(ctx.vaultDataDir, instanceId);
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, async () => {
+    await ctx.activationSocket?.close();
+    process.exit(0);
+  });
+}
 
 const server = new McpServer({
   name: "vault-neural-link",

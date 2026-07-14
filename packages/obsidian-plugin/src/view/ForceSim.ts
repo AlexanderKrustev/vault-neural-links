@@ -144,6 +144,10 @@ export class ForceSim {
   private continuousAnimation = false;
   /** carried across setData calls so unchanged notes keep their position instead of re-exploding */
   private nodesById = new Map<string, SimNode>();
+  /** transient push-based state fed by live activate() events, not recomputed on setData */
+  private activating = new Map<string, { hop: number; start: number }>();
+  /** keyed by directional edge, not a growing log — a later traversal of the same edge just refreshes its start time */
+  private activatingEdges = new Map<string, { key: string; start: number }>();
 
   onTick(callback: (nodes: SimNode[]) => void): void {
     this.tickCallback = callback;
@@ -170,6 +174,25 @@ export class ForceSim {
   /** Highest consolidatedScore across this note's incident neural edges; 0 if never promoted. */
   getConsolidatedScore(id: string): number {
     return this.consolidated.get(id) ?? 0;
+  }
+
+  /** Records a live node_activated event for the activation ring to render; expiry/filtering by age is Renderer's job. */
+  markNodeActivated(id: string, hop: number): void {
+    this.activating.set(id, { hop, start: performance.now() });
+  }
+
+  /** Records a live edge_traversed event. Directional (unlike edgeKey()'s sorted key) — direction is the point of the animation. */
+  markEdgeTraversed(from: string, to: string): void {
+    const key = `${from}->${to}`;
+    this.activatingEdges.set(key, { key, start: performance.now() });
+  }
+
+  getActivating(id: string): { hop: number; start: number } | undefined {
+    return this.activating.get(id);
+  }
+
+  getActivatingEdges(): readonly { key: string; start: number }[] {
+    return [...this.activatingEdges.values()];
   }
 
   /** Wake the simulation so it reorganizes around a change (e.g. a node drag). */

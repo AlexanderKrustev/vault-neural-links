@@ -58,3 +58,31 @@
   white-space: pre;
   pointer-events: none;
 }
+
+.vault-neural-links-retrieval-panel {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  z-index: 50;
+  width: 320px;
+  max-height: 40%;
+  overflow-y: auto;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.vault-neural-links-retrieval-panel-header {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.vault-neural-links-retrieval-panel-row {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  white-space: normal;
+  word-break: break-word;
+}

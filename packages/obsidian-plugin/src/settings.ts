@@ -5,6 +5,8 @@ export interface VaultNeuralLinksSettings {
   minWeightFilter: number;
   /** keep a gentle jitter running forever instead of settling after the initial layout */
   continuousAnimation: boolean;
+  /** rendering-only pacing for live activation events — "study" staggers hops ~150-300ms apart; engine timing itself is never altered */
+  playbackMode: "live" | "study";
 }
 
 export const DEFAULT_SETTINGS: VaultNeuralLinksSettings = {
@@ -12,4 +14,5 @@ export const DEFAULT_SETTINGS: VaultNeuralLinksSettings = {
   colorScheme: "default",
   minWeightFilter: 0,
   continuousAnimation: false,
+  playbackMode: "live",
 };

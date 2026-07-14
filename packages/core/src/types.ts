@@ -148,3 +148,30 @@ export interface ActivatedNote {
   /** Fewest hops from the origin note at which this note was reached. */
   hops: number;
 }
+
+/**
+ * Emitted by `activate()` as it walks the graph, so a caller (the MCP server,
+ * in turn broadcasting to the Obsidian plugin) can animate/audit the
+ * traversal instead of only seeing the final ranked result set.
+ */
+export type ActivationEventType = "node_activated" | "edge_traversed";
+
+export interface ActivationTraceEvent {
+  type: ActivationEventType;
+  /** Groups every event from one activate() call. */
+  runId: string;
+  /** The note activate() was called on. */
+  origin: string;
+  hop: number;
+  /** Set on "node_activated". */
+  node?: string;
+  /** Set on "edge_traversed". */
+  from?: string;
+  /** Set on "edge_traversed". */
+  to?: string;
+  /** Energy transferred along the edge / arriving at the node. */
+  energy: number;
+  ts: string;
+}
+
+export type ActivationEventSink = (event: ActivationTraceEvent) => void;

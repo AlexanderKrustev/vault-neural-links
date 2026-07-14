@@ -5,7 +5,13 @@ import { getWeightedNeighbors, computeLiveNeighborWeights } from "./query.js";
 import { activate } from "./activation.js";
 import { resolveDataDir } from "./vaultPaths.js";
 import { SessionBuffer, persistSessionBuffer } from "./priming.js";
-import type { ActivatedNote, CompactionResult, SpreadingActivationConfig, WeightedNeighbor } from "./types.js";
+import type {
+  ActivatedNote,
+  ActivationEventSink,
+  CompactionResult,
+  SpreadingActivationConfig,
+  WeightedNeighbor,
+} from "./types.js";
 
 export * from "./types.js";
 export * from "./parser.js";
@@ -30,7 +36,12 @@ export interface VaultLinkClient {
   logTraversal(from: string, to: string): Promise<void>;
   reinforce(from: string, to: string, boost?: number): Promise<void>;
   getWeightedNeighbors(note: string, topK?: number): Promise<WeightedNeighbor[]>;
-  activate(note: string, energy?: number, config?: SpreadingActivationConfig): Promise<ActivatedNote[]>;
+  activate(
+    note: string,
+    energy?: number,
+    config?: SpreadingActivationConfig,
+    onEvent?: ActivationEventSink,
+  ): Promise<ActivatedNote[]>;
   compact(): Promise<CompactionResult>;
 }
 
@@ -73,9 +84,14 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
       return getWeightedNeighbors(vaultDataDir, note, topK, vaultPath, sessionBuffer);
     },
 
-    async activate(note: string, energy: number = DEFAULT_ACTIVATION_ENERGY, config?: SpreadingActivationConfig) {
+    async activate(
+      note: string,
+      energy: number = DEFAULT_ACTIVATION_ENERGY,
+      config?: SpreadingActivationConfig,
+      onEvent?: ActivationEventSink,
+    ) {
       await touch(note);
-      return activate(vaultDataDir, note, energy, config, vaultPath, sessionBuffer);
+      return activate(vaultDataDir, note, energy, config, vaultPath, sessionBuffer, onEvent);
     },
 
     async compact() {

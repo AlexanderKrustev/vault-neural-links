@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { appendEvent } from "../src/logger.js";
 import { compact } from "../src/compactor.js";
 import { activate } from "../src/activation.js";
-import type { EventLogEntry } from "../src/types.js";
+import type { ActivationTraceEvent, EventLogEntry } from "../src/types.js";
 
 function event(overrides: Partial<EventLogEntry>): EventLogEntry {
   return {
@@ -113,5 +113,27 @@ describe("activate (spreading activation)", () => {
 
     const result = await activate(dataDir, "A", 10);
     expect(result.find((n) => n.path === "A")).toBeUndefined();
+  });
+
+  it("emits ordered edge_traversed/node_activated events with a stable runId", async () => {
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 10 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "B", to: "C", weight_delta: 10 }));
+    await compact(dataDir);
+
+    const events: ActivationTraceEvent[] = [];
+    await activate(dataDir, "A", 10, { energyEdgeWeightDecayPerHop: 0.9, maxHops: 2, minThreshold: 0.001 }, undefined, undefined, (e) =>
+      events.push(e),
+    );
+
+    expect(events.map((e) => e.type)).toEqual(["edge_traversed", "node_activated", "edge_traversed", "node_activated"]);
+
+    const [edge1, node1, edge2, node2] = events;
+    expect(edge1).toMatchObject({ from: "A", to: "B", hop: 1 });
+    expect(node1).toMatchObject({ node: "B", hop: 1 });
+    expect(edge2).toMatchObject({ from: "B", to: "C", hop: 2 });
+    expect(node2).toMatchObject({ node: "C", hop: 2 });
+
+    const runIds = new Set(events.map((e) => e.runId));
+    expect(runIds.size).toBe(1);
   });
 });

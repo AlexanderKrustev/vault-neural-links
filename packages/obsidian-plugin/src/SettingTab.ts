@@ -73,5 +73,23 @@ export class VaultNeuralLinksSettingTab extends PluginSettingTab {
           this.plugin.refreshGraphViews();
         }),
       );
+
+    new Setting(containerEl)
+      .setName("Activation playback speed")
+      .setDesc(
+        "Live plays activation pulses at real ms-scale timing; Study staggers each hop ~150-300ms apart " +
+          "so it's watchable. Rendering pace only — the underlying retrieval timing is never altered.",
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("live", "Live")
+          .addOption("study", "Study")
+          .setValue(this.plugin.settings.playbackMode)
+          .onChange((value) => {
+            this.plugin.settings.playbackMode = value as "live" | "study";
+            void this.plugin.saveSettings();
+            this.plugin.refreshGraphViews();
+          }),
+      );
   }
 }

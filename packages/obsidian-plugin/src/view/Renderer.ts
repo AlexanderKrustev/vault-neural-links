@@ -1,6 +1,12 @@
 import { nodeRadius, type ForceSim, type SimEdge, type SimNode } from "./ForceSim.js";
 
 const PULSE_DURATION_MS = 600;
+// Long enough to follow the moving point, short enough to finish before
+// Study mode's next hop (150-300ms gap) typically arrives.
+const DIRECTIONAL_PULSE_DURATION_MS = 900;
+// Deliberately outlives the directional pulse that feeds it, so "pulse
+// arrives, node glows, fades" reads as one hop.
+const ACTIVATION_RING_DURATION_MS = 1200;
 const DEFAULT_EDGE_MAX_AGE_DAYS = 30;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 5;
@@ -63,6 +69,7 @@ export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private nodes: SimNode[] = [];
   private pulses: Pulse[] = [];
+  private directionalPulses: { source: string; target: string; start: number }[] = [];
   private rafHandle: number | null = null;
   private hoveredEdge: SimEdge | null = null;
   private hoveredNode: SimNode | null = null;
@@ -154,6 +161,11 @@ export class Renderer {
     this.pulses.push({ key: edgeKey(source, target), start: performance.now() });
   }
 
+  /** A bright, fixed-color moving point along source→target for live activation events — distinct from the weight-gradient reinforcement pulse above. */
+  pulseEdgeDirectional(source: string, target: string): void {
+    this.directionalPulses.push({ source, target, start: performance.now() });
+  }
+
   zoomIn(): void {
     this.zoomAt(this.canvas.width / 2, this.canvas.height / 2, ZOOM_STEP);
   }
@@ -213,6 +225,7 @@ export class Renderer {
 
     const now = performance.now();
     this.pulses = this.pulses.filter((p) => now - p.start < PULSE_DURATION_MS);
+    this.directionalPulses = this.directionalPulses.filter((p) => now - p.start < DIRECTIONAL_PULSE_DURATION_MS);
 
     const hoveredId = this.hoveredNode?.id;
 
@@ -262,6 +275,23 @@ export class Renderer {
       ctx.stroke();
     }
 
+    for (const pulse of this.directionalPulses) {
+      const source = this.nodes.find((n) => n.id === pulse.source);
+      const target = this.nodes.find((n) => n.id === pulse.target);
+      if (!source || !target || source.x === undefined || source.y === undefined) continue;
+      if (target.x === undefined || target.y === undefined) continue;
+
+      const t = Math.min(1, (now - pulse.start) / DIRECTIONAL_PULSE_DURATION_MS);
+      const fade = 1 - t;
+      const px = source.x + (target.x - source.x) * t;
+      const py = source.y + (target.y - source.y) * t;
+
+      ctx.beginPath();
+      ctx.arc(px, py, 4 / this.scale, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${fade})`;
+      ctx.fill();
+    }
+
     for (const node of this.nodes) {
       if (node.x === undefined || node.y === undefined) continue;
       const isHovered = this.hoveredNode === node;
@@ -294,6 +324,18 @@ export class Renderer {
         ctx.strokeStyle = "rgba(255, 170, 60, 0.9)";
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius + 8 / this.scale, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      const activating = this.sim.getActivating(node.id);
+      if (activating && now - activating.start < ACTIVATION_RING_DURATION_MS) {
+        const fade = 1 - (now - activating.start) / ACTIVATION_RING_DURATION_MS;
+        ctx.save();
+        ctx.lineWidth = 2 / this.scale;
+        ctx.strokeStyle = `rgba(120, 200, 255, ${fade})`;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + 12 / this.scale, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }

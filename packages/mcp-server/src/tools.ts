@@ -11,13 +11,16 @@ import {
   resolveDataDir,
   searchNotes,
   writeNote,
+  type ActivationTraceEvent,
   type VaultLinkClient,
 } from "@vault-neural-links/core";
+import type { ActivationSocketServer } from "./activationSocket.js";
 
 export interface ToolContext {
   vaultPath: string;
   vaultDataDir: string;
   client: VaultLinkClient;
+  activationSocket?: ActivationSocketServer;
 }
 
 function textResult(value: unknown) {
@@ -80,8 +83,17 @@ export const activateTool = {
         maxHops !== undefined || minThreshold !== undefined
           ? { ...DEFAULT_SPREADING_ACTIVATION_CONFIG, ...(maxHops !== undefined && { maxHops }), ...(minThreshold !== undefined && { minThreshold }) }
           : undefined;
-      const activated = await ctx.client.activate(note, energy, config);
-      return textResult(activated);
+
+      // `trace` is Claude's own audit trail of the retrieval path,
+      // independent of whether the Obsidian plugin is listening; the same
+      // callback also broadcasts to any connected sockets so both views can
+      // never drift apart.
+      const trace: ActivationTraceEvent[] = [];
+      const activated = await ctx.client.activate(note, energy, config, (event) => {
+        trace.push(event);
+        ctx.activationSocket?.broadcast(event);
+      });
+      return textResult({ activated, trace });
     },
 };
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,15 +111,19 @@ describe("mcp-server tools", () => {
     expect(b.weight).toBeGreaterThan(c.weight);
   });
 
-  it("activate surfaces a two-hop neighbor not directly linked to the origin", async () => {
+  it("activate surfaces a two-hop neighbor not directly linked to the origin, with a populated trace", async () => {
     await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
     await reinforceLinkTool.handler(ctx)({ from: "B", to: "C", boost: 10 });
     await compactWeightsTool.handler(ctx)({});
 
-    const activated = parseResult(await activateTool.handler(ctx)({ note: "A" }));
+    const { activated, trace } = parseResult(await activateTool.handler(ctx)({ note: "A" }));
     const c = activated.find((n: { path: string }) => n.path === "C");
     expect(c).toBeDefined();
     expect(c.hops).toBe(2);
+
+    expect(trace.length).toBeGreaterThan(0);
+    expect(trace.every((e: { runId: string }) => e.runId === trace[0].runId)).toBe(true);
+    expect(trace.some((e: { type: string; to?: string }) => e.type === "edge_traversed" && e.to === "B")).toBe(true);
   });
 
   it("activate respects maxHops override", async () => {
@@ -127,8 +131,20 @@ describe("mcp-server tools", () => {
     await reinforceLinkTool.handler(ctx)({ from: "B", to: "C", boost: 10 });
     await compactWeightsTool.handler(ctx)({});
 
-    const activated = parseResult(await activateTool.handler(ctx)({ note: "A", maxHops: 1 }));
+    const { activated } = parseResult(await activateTool.handler(ctx)({ note: "A", maxHops: 1 }));
     expect(activated.map((n: { path: string }) => n.path)).toEqual(["B"]);
+  });
+
+  it("activate broadcasts every trace event to the activation socket", async () => {
+    const broadcast = vi.fn();
+    ctx.activationSocket = { port: 0, broadcast, close: async () => {} };
+
+    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
+    await compactWeightsTool.handler(ctx)({});
+
+    const { trace } = parseResult(await activateTool.handler(ctx)({ note: "A" }));
+    expect(broadcast).toHaveBeenCalledTimes(trace.length);
+    expect(broadcast.mock.calls[0][0]).toEqual(trace[0]);
   });
 
   it("create_note writes a note and reports autoLinked, then errors on a duplicate create", async () => {

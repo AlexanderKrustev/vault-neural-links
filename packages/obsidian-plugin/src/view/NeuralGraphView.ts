@@ -1,10 +1,13 @@
 import { FileSystemAdapter, ItemView, WorkspaceLeaf } from "obsidian";
-import type { LinkWeightsFile } from "@vault-neural-links/core";
+import type { ActivationTraceEvent, LinkWeightsFile } from "@vault-neural-links/core";
 import type VaultNeuralLinksPlugin from "../main.js";
 import { WeightsWatcher } from "../WeightsWatcher.js";
 import { PrimedWatcher } from "../PrimedWatcher.js";
+import { ActivationSocketWatcher } from "../ActivationSocketWatcher.js";
 import { ForceSim, type NativeEdge } from "./ForceSim.js";
 import { Renderer } from "./Renderer.js";
+import { ActivationPacer } from "./ActivationPacer.js";
+import { RetrievalPathPanel } from "./RetrievalPathPanel.js";
 
 export const NEURAL_GRAPH_VIEW_TYPE = "vault-neural-links-view";
 
@@ -14,6 +17,9 @@ export class NeuralGraphView extends ItemView {
   private renderer: Renderer | null = null;
   private watcher: WeightsWatcher | null = null;
   private primedWatcher: PrimedWatcher | null = null;
+  private activationSocketWatcher: ActivationSocketWatcher | null = null;
+  private activationPacer: ActivationPacer | null = null;
+  private retrievalPathPanel: RetrievalPathPanel | null = null;
   private statusEl: HTMLDivElement | null = null;
   private lastWeights: LinkWeightsFile | null = null;
   private firstLoadDone = false;
@@ -92,6 +98,28 @@ export class NeuralGraphView extends ItemView {
     const sessionDir = `${adapter.getBasePath()}/.vault-neural-links/session`;
     this.primedWatcher = new PrimedWatcher(sessionDir);
     this.primedWatcher.start((primed) => this.renderer?.setPrimedNotes(primed));
+
+    this.retrievalPathPanel = new RetrievalPathPanel();
+    this.retrievalPathPanel.mount(container);
+
+    const pacer = new ActivationPacer();
+    pacer.setMode(this.plugin.settings.playbackMode);
+    pacer.start((event) => this.onActivationEvent(event));
+    this.activationPacer = pacer;
+
+    const activationSocketsDir = `${adapter.getBasePath()}/.vault-neural-links/activation-sockets`;
+    this.activationSocketWatcher = new ActivationSocketWatcher(activationSocketsDir);
+    this.activationSocketWatcher.start((event) => pacer.feed(event));
+  }
+
+  private onActivationEvent(event: ActivationTraceEvent): void {
+    if (event.type === "edge_traversed" && event.from && event.to) {
+      this.sim?.markEdgeTraversed(event.from, event.to);
+      this.renderer?.pulseEdgeDirectional(event.from, event.to);
+    } else if (event.type === "node_activated" && event.node) {
+      this.sim?.markNodeActivated(event.node, event.hop);
+    }
+    this.retrievalPathPanel?.logEvent(event);
   }
 
   async onClose(): Promise<void> {
@@ -99,17 +127,24 @@ export class NeuralGraphView extends ItemView {
     this.watcher = null;
     this.primedWatcher?.stop();
     this.primedWatcher = null;
+    this.activationSocketWatcher?.stop();
+    this.activationSocketWatcher = null;
+    this.activationPacer?.stop();
+    this.activationPacer = null;
+    this.retrievalPathPanel?.unmount();
+    this.retrievalPathPanel = null;
     this.renderer?.stop();
     this.renderer = null;
     this.sim = null;
   }
 
-  /** Re-applies plugin settings (color scheme, decay window, min-weight filter, animation) to a live view. */
+  /** Re-applies plugin settings (color scheme, decay window, min-weight filter, animation, playback speed) to a live view. */
   applySettings(): void {
     if (!this.sim || !this.renderer) return;
     this.renderer.setColorScheme(this.plugin.settings.colorScheme);
     this.renderer.setEdgeMaxAgeDays(this.plugin.settings.decayHalfLifeDays);
     this.sim.setContinuousAnimation(this.plugin.settings.continuousAnimation);
+    this.activationPacer?.setMode(this.plugin.settings.playbackMode);
     if (this.lastWeights) {
       const notePaths = this.app.vault.getMarkdownFiles().map((f) => f.path.replace(/\.md$/, ""));
       this.sim.setData(notePaths, this.lastWeights, this.getNativeEdges(), this.plugin.settings.minWeightFilter);

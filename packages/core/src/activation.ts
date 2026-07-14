@@ -1,4 +1,5 @@
-import type { ActivatedNote, SpreadingActivationConfig } from "./types.js";
+import { randomUUID } from "node:crypto";
+import type { ActivatedNote, ActivationEventSink, SpreadingActivationConfig } from "./types.js";
 import { DEFAULT_SPREADING_ACTIVATION_CONFIG } from "./types.js";
 import { computeLiveNeighborWeights } from "./query.js";
 import type { SessionBuffer } from "./priming.js";
@@ -33,8 +34,10 @@ export async function activate(
   config: SpreadingActivationConfig = DEFAULT_SPREADING_ACTIVATION_CONFIG,
   vaultPath?: string,
   sessionBuffer?: SessionBuffer,
+  onEvent?: ActivationEventSink,
 ): Promise<ActivatedNote[]> {
   const accumulated = new Map<string, { energy: number; hops: number }>();
+  const runId = randomUUID();
 
   async function spread(current: string, currentEnergy: number, hop: number, visited: Set<string>): Promise<void> {
     if (hop > config.maxHops || currentEnergy < config.minThreshold) return;
@@ -50,6 +53,17 @@ export async function activate(
       const transferred = currentEnergy * config.energyEdgeWeightDecayPerHop * share;
       if (transferred < config.minThreshold) continue;
 
+      onEvent?.({
+        type: "edge_traversed",
+        runId,
+        origin: note,
+        hop,
+        from: current,
+        to: neighbor.path,
+        energy: transferred,
+        ts: new Date().toISOString(),
+      });
+
       const existing = accumulated.get(neighbor.path);
       if (existing) {
         existing.energy += transferred;
@@ -57,6 +71,16 @@ export async function activate(
       } else {
         accumulated.set(neighbor.path, { energy: transferred, hops: hop });
       }
+
+      onEvent?.({
+        type: "node_activated",
+        runId,
+        origin: note,
+        hop,
+        node: neighbor.path,
+        energy: transferred,
+        ts: new Date().toISOString(),
+      });
 
       if (!visited.has(neighbor.path)) {
         await spread(neighbor.path, transferred, hop + 1, new Set(visited).add(neighbor.path));
