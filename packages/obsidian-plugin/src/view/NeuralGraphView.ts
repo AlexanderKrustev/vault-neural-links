@@ -40,7 +40,7 @@ export class NeuralGraphView extends ItemView {
   }
 
   getIcon(): string {
-    return "git-fork";
+    return "brain";
   }
 
   async onOpen(): Promise<void> {

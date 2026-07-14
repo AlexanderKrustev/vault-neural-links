@@ -21,8 +21,20 @@ export class RetrievalPathPanel {
 
   mount(container: HTMLElement): void {
     const panel = container.createDiv({ cls: "vault-neural-links-retrieval-panel" });
-    panel.createDiv({ cls: "vault-neural-links-retrieval-panel-header", text: "Retrieval path" });
-    this.listEl = panel.createDiv();
+    const header = panel.createDiv({ cls: "vault-neural-links-retrieval-panel-header" });
+    header.createSpan({ text: "Retrieval path" });
+    const toggleBtn = header.createSpan({
+      cls: "vault-neural-links-retrieval-panel-toggle",
+      text: "×",
+    });
+    toggleBtn.setAttr("aria-label", "Hide retrieval path panel");
+    this.listEl = panel.createDiv({ cls: "vault-neural-links-retrieval-panel-body" });
+    toggleBtn.addEventListener("click", () => {
+      const collapsed = panel.hasClass("is-collapsed");
+      panel.toggleClass("is-collapsed", !collapsed);
+      toggleBtn.setText(collapsed ? "×" : "+");
+      toggleBtn.setAttr("aria-label", collapsed ? "Hide retrieval path panel" : "Show retrieval path panel");
+    });
   }
 
   unmount(): void {

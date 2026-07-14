@@ -12,7 +12,7 @@ export default class VaultNeuralLinksPlugin extends Plugin {
     this.registerView(NEURAL_GRAPH_VIEW_TYPE, (leaf: WorkspaceLeaf) => new NeuralGraphView(leaf, this));
     this.addSettingTab(new VaultNeuralLinksSettingTab(this.app, this));
 
-    this.addRibbonIcon("git-fork", "Open Neural Graph", () => {
+    this.addRibbonIcon("brain", "Open Neural Graph", () => {
       void this.activateView();
     });
 

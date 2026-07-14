@@ -8,6 +8,7 @@ import {
   type Force,
 } from "d3-force";
 import type { LinkWeightsFile } from "@vault-neural-links/core";
+import { computeClusters } from "./Clustering.js";
 
 // baseStrength is undecayed — decay is applied live here rather than at
 // compaction (see packages/core/src/query.ts for the same formula, used by
@@ -58,10 +59,10 @@ export interface SimEdge {
 const JITTER_STRENGTH = 0.6;
 const JITTER_ALPHA_TARGET = 0.05;
 
-export const NODE_BASE_RADIUS = 5;
+export const NODE_BASE_RADIUS = 6;
 const NODE_DEGREE_SCALE = 3;
 const NODE_MAX_RADIUS = 22;
-const ISOLATED_RING_MARGIN = 40;
+const ISOLATED_RING_MARGIN = 24;
 
 /** Dot size grows with connection count — shared by layout collision and rendering. */
 export function nodeRadius(degree: number): number {
@@ -82,33 +83,79 @@ function createJitterForce(): Force<SimNode, SimEdge> {
   return force;
 }
 
+const ISOLATED_RING_BAND = 45;
+
 /**
- * Keeps isolated (degree-0) notes at or beyond the distance of the
- * farthest connected note, recomputed every tick since the connected
- * cluster's extent moves as it settles. Nodes already farther out than
- * that are left alone — only pulled inward gently to avoid drifting off
- * into space — so "closer" never means closer than the cluster's reach.
+ * Keeps isolated (degree-0) notes within a narrow band just beyond the
+ * typical reach of the connected cluster, recomputed every tick since the
+ * cluster's extent moves as it settles. Sized off the 75th-percentile
+ * connected distance rather than the true max — a single outlier connected
+ * note (e.g. one pulled out by the cluster-anchor force) would otherwise
+ * blow the ring radius out for every isolated dot. The band is enforced
+ * symmetrically (pulled in if too close, pulled back if too far) so
+ * isolated notes settle into one tight ring rather than scattering to
+ * whatever distance they happened to drift out to.
  */
 function createIsolateRingForce(degree: Map<string, number>): Force<SimNode, SimEdge> {
   let nodes: SimNode[] = [];
   const force: Force<SimNode, SimEdge> = (alpha) => {
-    let maxConnectedDist = 0;
+    const connectedDists: number[] = [];
     for (const n of nodes) {
       if ((degree.get(n.id) ?? 0) === 0) continue;
       if (n.x === undefined || n.y === undefined) continue;
-      maxConnectedDist = Math.max(maxConnectedDist, Math.hypot(n.x, n.y));
+      connectedDists.push(Math.hypot(n.x, n.y));
     }
-    const minRadius = maxConnectedDist + ISOLATED_RING_MARGIN;
+    connectedDists.sort((a, b) => a - b);
+    const percentileIdx = Math.floor(connectedDists.length * 0.75);
+    const typicalConnectedDist = connectedDists[Math.min(percentileIdx, connectedDists.length - 1)] ?? 0;
+    const minRadius = typicalConnectedDist + ISOLATED_RING_MARGIN;
+    const maxRadius = minRadius + ISOLATED_RING_BAND;
 
     for (const n of nodes) {
       if ((degree.get(n.id) ?? 0) !== 0) continue;
       if (n.x === undefined || n.y === undefined) continue;
       const dist = Math.hypot(n.x, n.y) || 0.0001;
       const angle = Math.atan2(n.y, n.x);
-      const diff = dist < minRadius ? minRadius - dist : (minRadius - dist) * 0.05;
-      const k = 0.08 * alpha;
+      const target = dist < minRadius ? minRadius : dist > maxRadius ? maxRadius : dist;
+      const diff = target - dist;
+      const k = 0.12 * alpha;
       n.vx = (n.vx ?? 0) + Math.cos(angle) * diff * k;
       n.vy = (n.vy ?? 0) + Math.sin(angle) * diff * k;
+    }
+  };
+  force.initialize = (initNodes) => {
+    nodes = initNodes;
+  };
+  return force;
+}
+
+const CLUSTER_FORCE_STRENGTH = 0.025;
+const CLUSTER_ANCHOR_SPACING = 55;
+
+/**
+ * Nudges each connected node toward an anchor point shared by its detected
+ * community (see Clustering.ts), so distinct topic groups spatially
+ * separate into their own blobs instead of collapsing into one hairball.
+ * Deliberately weak relative to charge/link/collide — it biases layout,
+ * it doesn't dictate it, so within-cluster structure stays organic.
+ */
+function createClusterForce(clusterOf: Map<string, number>, clusterCount: number): Force<SimNode, SimEdge> {
+  let nodes: SimNode[] = [];
+  const radius = CLUSTER_ANCHOR_SPACING * Math.max(1, Math.sqrt(clusterCount));
+  const anchors: [number, number][] = [];
+  for (let i = 0; i < clusterCount; i++) {
+    const angle = (2 * Math.PI * i) / clusterCount;
+    anchors.push([Math.cos(angle) * radius, Math.sin(angle) * radius]);
+  }
+
+  const force: Force<SimNode, SimEdge> = (alpha) => {
+    const k = CLUSTER_FORCE_STRENGTH * alpha;
+    for (const n of nodes) {
+      const cluster = clusterOf.get(n.id);
+      if (cluster === undefined || n.x === undefined || n.y === undefined) continue;
+      const [ax, ay] = anchors[cluster];
+      n.vx = (n.vx ?? 0) + (ax - n.x) * k;
+      n.vy = (n.vy ?? 0) + (ay - n.y) * k;
     }
   };
   force.initialize = (initNodes) => {
@@ -260,6 +307,16 @@ export class ForceSim {
     }
     this.degree = degree;
 
+    const clusterEdges = edges.map((e) => ({
+      source: e.source as string,
+      target: e.target as string,
+      // native (wikilink) edges carry no usage weight — treat them as a
+      // fixed moderate pull so structural links still shape communities
+      weight: e.kind === "native" ? 1 : e.weight,
+    }));
+    const clusterOf = computeClusters([...ids], clusterEdges);
+    const clusterCount = new Set(clusterOf.values()).size;
+
     const lastTouched = new Map<string, string>();
     for (const e of neuralEdges) {
       const source = e.source as string;
@@ -271,19 +328,31 @@ export class ForceSim {
 
     this.simulation?.stop();
     this.simulation = forceSimulation(nodes)
-      .force("charge", forceManyBody().strength(-90))
+      .alphaDecay(0.012)
+      .velocityDecay(0.35)
+      // isolated notes get much weaker mutual repulsion so they pack close
+      // together into a tight ring instead of spreading out around it
+      .force(
+        "charge",
+        forceManyBody<SimNode>()
+          .strength((d) => (degree.get(d.id) ?? 0) === 0 ? -30 : -220)
+          .distanceMax(400),
+      )
       .force(
         "link",
         forceLink<SimNode, SimEdge>(edges)
           .id((d) => d.id)
-          .distance(55)
-          .strength((d) => (d.kind === "native" ? 0.05 : 0.3)),
+          .distance(75)
+          .strength((d) => (d.kind === "native" ? 0.05 : 0.25)),
       )
       .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide((d) => nodeRadius(degree.get(d.id) ?? 0) + 3))
+      .force("collide", forceCollide((d) => nodeRadius(degree.get(d.id) ?? 0) + 8))
       // notes with no connections at all are kept at or beyond the reach of
       // the connected cluster, instead of drifting in among it
-      .force("isolate", createIsolateRingForce(degree));
+      .force("isolate", createIsolateRingForce(degree))
+      // pulls each detected community toward its own anchor so topic groups
+      // visually separate instead of collapsing into one dense hairball
+      .force("cluster", clusterCount > 1 ? createClusterForce(clusterOf, clusterCount) : null);
 
     // incremental updates start from a mild reheat, not a full cold-start alpha=1,
     // since reused nodes already have sensible positions

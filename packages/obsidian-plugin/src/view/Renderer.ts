@@ -245,19 +245,19 @@ export class Renderer {
 
       if (edge.kind === "native") {
         const highlighted = isHovered || touchesHoveredNode;
-        ctx.lineWidth = (highlighted ? 1.5 : 0.75) / this.scale;
+        ctx.lineWidth = (highlighted ? 1.2 : 0.5) / this.scale;
         ctx.strokeStyle = highlighted
-          ? "rgba(210, 210, 220, 0.75)"
+          ? "rgba(210, 210, 220, 0.6)"
           : dimmed
-            ? "rgba(140, 140, 150, 0.08)"
-            : "rgba(140, 140, 150, 0.25)";
+            ? "rgba(140, 140, 150, 0.04)"
+            : "rgba(140, 140, 150, 0.1)";
         ctx.stroke();
         continue;
       }
 
       const ageDays = (Date.now() - Date.parse(edge.lastTouched)) / 86_400_000;
       const freshness = Math.max(0, 1 - ageDays / this.edgeMaxAgeDays);
-      const thickness = Math.max(0.5, Math.log2(edge.weight + 1));
+      const thickness = Math.max(0.4, Math.log2(edge.weight + 1) * 0.6);
       const pulse = this.pulses.find((p) => p.key === edgeKey(source.id, target.id));
       const pulseBoost = pulse ? 1 - (now - pulse.start) / PULSE_DURATION_MS : 0;
 
@@ -265,7 +265,7 @@ export class Renderer {
       const maxWeight = this.sim.getMaxWeight();
       const [r, g, b] = weightColor(maxWeight > 0 ? edge.weight / maxWeight : 0, this.gradient);
 
-      const baseAlpha = Math.min(1, 0.15 + freshness * 0.7 + pulseBoost * 0.5);
+      const baseAlpha = Math.min(1, 0.06 + freshness * 0.35 + pulseBoost * 0.5);
       const alpha = touchesHoveredNode ? 1 : dimmed ? baseAlpha * 0.15 : baseAlpha;
 
       ctx.lineWidth = (thickness + pulseBoost * 3 + (touchesHoveredNode ? 0.5 : 0)) / this.scale;

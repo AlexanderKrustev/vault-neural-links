@@ -74,10 +74,31 @@
   padding: 6px 8px;
 }
 
+.vault-neural-links-retrieval-panel.is-collapsed {
+  max-height: unset;
+  overflow-y: visible;
+}
+
 .vault-neural-links-retrieval-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-weight: 600;
   margin-bottom: 4px;
   color: var(--text-muted);
+}
+
+.vault-neural-links-retrieval-panel-toggle {
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.vault-neural-links-retrieval-panel-toggle:hover {
+  color: var(--text-normal);
+}
+
+.vault-neural-links-retrieval-panel.is-collapsed .vault-neural-links-retrieval-panel-body {
+  display: none;
 }
 
 .vault-neural-links-retrieval-panel-row {
