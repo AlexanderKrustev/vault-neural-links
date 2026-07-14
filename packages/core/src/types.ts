@@ -213,3 +213,22 @@ export interface ActivationTraceEvent {
 }
 
 export type ActivationEventSink = (event: ActivationTraceEvent) => void;
+
+/**
+ * One line per retrieveWithFallback call, so an operator can catch a whole
+ * cluster of queries systematically falling through to a weaker tier (or
+ * timing out) before it shows up as a bad session/demo, rather than only
+ * finding out after the fact. Appended to retrieval-log.jsonl by logger.ts.
+ */
+export interface RetrievalLogEntry {
+  ts: string;
+  instance: string;
+  note: string;
+  tier: "activation" | "keyword" | "recency";
+  resultCount: number;
+  latencyMs: number;
+  /** True if the per-call time budget was exhausted before retrieval finished, so the tier/results served may be partial. */
+  timedOut: boolean;
+  /** How many times activation's min/structuralMinThreshold were relaxed to try to reach minK results. */
+  relaxations: number;
+}

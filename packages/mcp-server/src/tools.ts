@@ -58,10 +58,14 @@ export const activateTool = {
       "too — unlike get_weighted_neighbors, which only ever sees direct links. A note reachable " +
       "through several indirect routes accumulates energy from each and can outrank one reachable " +
       "through a single weak direct link. Use this when direct neighbors alone seem to be missing " +
-      "relevant indirect context. Never returns empty: if spreading activation finds no edges at " +
-      "all (usage-weighted or structural), falls back to a keyword/title match over the vault, and " +
-      "as a last resort to the most recently touched notes. The response's `tier` field reports " +
-      "which of these actually served the result.",
+      "relevant indirect context. Never returns empty: if fewer than minK notes activate, energy " +
+      "thresholds are progressively relaxed and retried; if spreading activation still finds no " +
+      "edges at all (usage-weighted or structural), falls back to a keyword/title match over the " +
+      "vault, and as a last resort to the most recently touched notes. The whole call is bounded " +
+      "by budgetMs — past that, partial activation results are returned instead of blocking, and " +
+      "the (relatively expensive) keyword tier is skipped in favor of the cheap recency tier. The " +
+      "response's `tier` field reports which of these actually served the result, `relaxations` " +
+      "how many times thresholds were relaxed, and `timedOut` whether the budget ran out.",
     inputSchema: {
       note: z.string().describe("Vault-relative note path, without .md extension"),
       energy: z.number().positive().optional().describe("Starting energy at the origin note (default 10)"),
@@ -72,6 +76,17 @@ export const activateTool = {
         .positive()
         .optional()
         .describe("Energy cutoff below which propagation/inclusion stops for structural-only (floor-weight) edges (default 0.05)"),
+      minK: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Guaranteed minimum result count to aim for via threshold relaxation before falling through tiers (default 3)"),
+      budgetMs: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Hard time budget in ms for the whole call, including relaxation retries (default 300)"),
     },
   },
   handler:
@@ -82,12 +97,16 @@ export const activateTool = {
       maxHops,
       minThreshold,
       structuralMinThreshold,
+      minK,
+      budgetMs,
     }: {
       note: string;
       energy?: number;
       maxHops?: number;
       minThreshold?: number;
       structuralMinThreshold?: number;
+      minK?: number;
+      budgetMs?: number;
     }) => {
       const config =
         maxHops !== undefined || minThreshold !== undefined || structuralMinThreshold !== undefined
@@ -104,11 +123,23 @@ export const activateTool = {
       // callback also broadcasts to any connected sockets so both views can
       // never drift apart.
       const trace: ActivationTraceEvent[] = [];
-      const result = await ctx.client.retrieveWithFallback(note, energy, config, (event) => {
-        trace.push(event);
-        ctx.activationSocket?.broadcast(event);
+      const result = await ctx.client.retrieveWithFallback(
+        note,
+        energy,
+        config,
+        (event) => {
+          trace.push(event);
+          ctx.activationSocket?.broadcast(event);
+        },
+        { minK, budgetMs },
+      );
+      return textResult({
+        activated: result.notes,
+        tier: result.tier,
+        relaxations: result.relaxations,
+        timedOut: result.timedOut,
+        trace,
       });
-      return textResult({ activated: result.notes, tier: result.tier, trace });
     },
 };
 

@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { appendEvent } from "./logger.js";
+import { appendEvent, appendRetrievalLog } from "./logger.js";
 import { compact } from "./compactor.js";
 import { rebuildStructuralIndex } from "./structuralLinks.js";
 import { getWeightedNeighbors, computeLiveNeighborWeights } from "./query.js";
 import { activate } from "./activation.js";
-import { retrieveWithFallback, type RetrievalResult } from "./fallback.js";
+import { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
 import { resolveDataDir } from "./vaultPaths.js";
 import { SessionBuffer, persistSessionBuffer } from "./priming.js";
 import type {
@@ -26,7 +26,7 @@ export { consolidate, runNightlyConsolidation } from "./consolidation.js";
 export { resolveSupersededBy, readSupersession } from "./relations.js";
 export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from "./query.js";
 export { activate } from "./activation.js";
-export { retrieveWithFallback, type RetrievalResult } from "./fallback.js";
+export { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
 export { resolveDataDir } from "./vaultPaths.js";
 export * from "./frontmatter.js";
 export * from "./notes.js";
@@ -51,6 +51,7 @@ export interface VaultLinkClient {
     energy?: number,
     config?: SpreadingActivationConfig,
     onEvent?: ActivationEventSink,
+    options?: RetrieveWithFallbackOptions,
   ): Promise<RetrievalResult>;
   compact(onEvent?: ActivationEventSink): Promise<CompactionResult>;
 }
@@ -113,9 +114,22 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
       energy: number = DEFAULT_ACTIVATION_ENERGY,
       config?: SpreadingActivationConfig,
       onEvent?: ActivationEventSink,
+      options?: RetrieveWithFallbackOptions,
     ) {
       await touch(note);
-      return retrieveWithFallback(vaultDataDir, vaultPath, note, energy, config, sessionBuffer, onEvent);
+      const start = Date.now();
+      const result = await retrieveWithFallback(vaultDataDir, vaultPath, note, energy, config, sessionBuffer, onEvent, options);
+      await appendRetrievalLog(vaultDataDir, instanceId, {
+        ts: new Date().toISOString(),
+        instance: instanceId,
+        note,
+        tier: result.tier,
+        resultCount: result.notes.length,
+        latencyMs: Date.now() - start,
+        timedOut: result.timedOut,
+        relaxations: result.relaxations,
+      });
+      return result;
     },
 
     async compact(onEvent?: ActivationEventSink) {

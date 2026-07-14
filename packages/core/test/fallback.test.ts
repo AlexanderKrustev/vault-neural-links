@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { appendEvent } from "../src/logger.js";
 import { compact } from "../src/compactor.js";
 import { retrieveWithFallback } from "../src/fallback.js";
+import { rebuildStructuralIndex } from "../src/structuralLinks.js";
 
 function event(overrides: { from: string; to: string; weight_delta: number }) {
   return {
@@ -67,5 +68,38 @@ describe("retrieveWithFallback", () => {
     const result = await retrieveWithFallback(dataDir, vaultPath, "A", 10);
     expect(result.tier).toBe("recency");
     expect(result.notes).toEqual([]);
+  });
+
+  it("relaxes energy thresholds until minK activated notes are reached, instead of accepting a thin result", async () => {
+    const links = ["B", "C", "D", "E", "F"].map((n) => `[[${n}]]`).join(" ");
+    await writeFile(join(vaultPath, "A.md"), links, "utf8");
+    for (const n of ["B", "C", "D", "E", "F"]) {
+      await writeFile(join(vaultPath, `${n}.md`), "body", "utf8");
+    }
+    await rebuildStructuralIndex(vaultPath, dataDir);
+
+    // Tuned so each of the 5 structural neighbors receives exactly 1.0
+    // energy on hop 1: with structuralMinThreshold=2 none qualify on the
+    // first pass, but after one relaxation (factor 0.5 -> threshold 1.0)
+    // all five clear `transferred < threshold`.
+    const config = { energyEdgeWeightDecayPerHop: 0.5, maxHops: 1, minThreshold: 2, structuralMinThreshold: 2 };
+
+    const result = await retrieveWithFallback(dataDir, vaultPath, "A", 10, config, undefined, undefined, { minK: 3 });
+
+    expect(result.tier).toBe("activation");
+    expect(result.relaxations).toBeGreaterThan(0);
+    expect(result.notes.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("returns a fast, partial result instead of blocking when the time budget is exhausted", async () => {
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 10 }));
+    await compact(dataDir);
+
+    const result = await retrieveWithFallback(dataDir, vaultPath, "A", 10, undefined, undefined, undefined, {
+      budgetMs: 0,
+    });
+
+    expect(result.timedOut).toBe(true);
+    expect(result.tier).toBe("recency");
   });
 });

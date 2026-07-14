@@ -116,7 +116,12 @@ describe("mcp-server tools", () => {
     await reinforceLinkTool.handler(ctx)({ from: "B", to: "C", boost: 10 });
     await compactWeightsTool.handler(ctx)({});
 
-    const { activated, trace } = parseResult(await activateTool.handler(ctx)({ note: "A" }));
+    // minK: 1 so this only ever activation-run once — the two-hop path here
+    // only ever surfaces 2 notes (B, C), which would otherwise be below the
+    // default minK=3 and trigger a threshold-relaxation retry (a second
+    // activate() run, with its own runId — see the minK relaxation test
+    // below for that behavior).
+    const { activated, trace } = parseResult(await activateTool.handler(ctx)({ note: "A", minK: 1 }));
     const c = activated.find((n: { path: string }) => n.path === "C");
     expect(c).toBeDefined();
     expect(c.hops).toBe(2);

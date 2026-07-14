@@ -1,6 +1,6 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { EventLogEntry } from "./types.js";
+import type { EventLogEntry, RetrievalLogEntry } from "./types.js";
 
 // Serializes appends per file so concurrent calls from the same instance
 // can't interleave partial writes (cross-instance safety comes from each
@@ -11,14 +11,7 @@ export function eventsFilePath(vaultDataDir: string, instanceId: string): string
   return join(vaultDataDir, "events", `${instanceId}.jsonl`);
 }
 
-export async function appendEvent(
-  vaultDataDir: string,
-  instanceId: string,
-  entry: EventLogEntry,
-): Promise<void> {
-  const filePath = eventsFilePath(vaultDataDir, instanceId);
-  const line = `${JSON.stringify(entry)}\n`;
-
+function queueAppend(filePath: string, line: string): Promise<void> {
   const previous = writeQueues.get(filePath) ?? Promise.resolve();
   const next = previous.catch(() => {}).then(async () => {
     await mkdir(dirname(filePath), { recursive: true });
@@ -27,4 +20,29 @@ export async function appendEvent(
 
   writeQueues.set(filePath, next);
   return next;
+}
+
+export async function appendEvent(
+  vaultDataDir: string,
+  instanceId: string,
+  entry: EventLogEntry,
+): Promise<void> {
+  return queueAppend(eventsFilePath(vaultDataDir, instanceId), `${JSON.stringify(entry)}\n`);
+}
+
+export function retrievalLogFilePath(vaultDataDir: string, instanceId: string): string {
+  return join(vaultDataDir, "retrieval", `${instanceId}.jsonl`);
+}
+
+/**
+ * Appends one retrieval-log line per retrieveWithFallback call (AIBRAIN-26)
+ * — separate from appendEvent's traverse/reinforce/decay log since this
+ * tracks call-level outcomes (tier, latency, timeouts), not graph edits.
+ */
+export async function appendRetrievalLog(
+  vaultDataDir: string,
+  instanceId: string,
+  entry: RetrievalLogEntry,
+): Promise<void> {
+  return queueAppend(retrievalLogFilePath(vaultDataDir, instanceId), `${JSON.stringify(entry)}\n`);
 }

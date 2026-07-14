@@ -26,6 +26,11 @@ import type { SessionBuffer } from "./priming.js";
  * still accumulates energy from that path, it just doesn't fan back out from
  * there), which is what keeps a two-node mutual link from recursing forever
  * within the hop bound.
+ *
+ * `deadline` (a `Date.now()`-comparable timestamp) bounds wall-clock time:
+ * once passed, `spread` stops exploring further but the caller still gets
+ * back whatever was accumulated so far, rather than the call hanging or
+ * throwing — see AIBRAIN-26.
  */
 export async function activate(
   vaultDataDir: string,
@@ -35,12 +40,14 @@ export async function activate(
   vaultPath?: string,
   sessionBuffer?: SessionBuffer,
   onEvent?: ActivationEventSink,
+  deadline?: number,
 ): Promise<ActivatedNote[]> {
   const accumulated = new Map<string, { energy: number; hops: number }>();
   const runId = randomUUID();
 
   async function spread(current: string, currentEnergy: number, hop: number, visited: Set<string>): Promise<void> {
     if (hop > config.maxHops || currentEnergy < config.structuralMinThreshold) return;
+    if (deadline !== undefined && Date.now() >= deadline) return;
 
     const neighbors = await computeLiveNeighborWeights(vaultDataDir, current, vaultPath, sessionBuffer);
     const totalWeight = neighbors.reduce((sum, n) => sum + Math.max(n.weight, 0), 0);

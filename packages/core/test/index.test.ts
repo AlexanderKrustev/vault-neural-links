@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { initInstance } from "../src/index.js";
-import { appendEvent } from "../src/logger.js";
+import { appendEvent, retrievalLogFilePath } from "../src/logger.js";
 import { sessionBufferFilePath } from "../src/priming.js";
 import type { ActivationTraceEvent, EventLogEntry, SessionBufferFile } from "../src/types.js";
 
@@ -117,5 +117,28 @@ describe("initInstance", () => {
     const parsed = JSON.parse(raw) as SessionBufferFile;
     expect(parsed.instance).toBe("test-instance");
     expect(parsed.notes).toEqual(["A", "B"]);
+  });
+
+  it("logs every retrieveWithFallback call to retrieval-log.jsonl", async () => {
+    const client = initInstance(vaultPath, "test-instance");
+    await client.logTraversal("A", "B");
+    await client.reinforce("A", "B", 10);
+    await client.compact();
+
+    const result = await client.retrieveWithFallback("A", 10);
+
+    const vaultDataDir = join(vaultPath, ".vault-neural-links");
+    const raw = await readFile(retrievalLogFilePath(vaultDataDir, "test-instance"), "utf8");
+    const lines = raw.trim().split("\n").map((line) => JSON.parse(line));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      instance: "test-instance",
+      note: "A",
+      tier: result.tier,
+      resultCount: result.notes.length,
+      relaxations: result.relaxations,
+      timedOut: result.timedOut,
+    });
+    expect(lines[0].latencyMs).toBeGreaterThanOrEqual(0);
   });
 });
