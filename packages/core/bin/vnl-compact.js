@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs compaction independent of any Claude Code session (cron / systemd timer).
-import { compact, resolveDataDir } from "../dist/index.js";
+import { compact, rebuildStructuralIndex, resolveDataDir } from "../dist/index.js";
 
 const vaultPath = process.argv[2];
 if (!vaultPath) {
@@ -8,9 +8,17 @@ if (!vaultPath) {
   process.exit(1);
 }
 
-compact(resolveDataDir(vaultPath))
+const vaultDataDir = resolveDataDir(vaultPath);
+
+compact(vaultDataDir)
   .then((result) => {
     console.log(`compacted ${result.edgeCount} edges at ${result.compactedAt}`);
+    return rebuildStructuralIndex(vaultPath, vaultDataDir);
+  })
+  .then((structuralResult) => {
+    console.log(
+      `structural index: ${structuralResult.edgeCount} edges across ${structuralResult.noteCount} notes at ${structuralResult.builtAt}`,
+    );
   })
   .catch((err) => {
     console.error(err);

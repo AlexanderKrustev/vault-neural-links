@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { appendEvent } from "../src/logger.js";
 import { compact } from "../src/compactor.js";
 import { getEdgeWeight, getWeightedNeighbors } from "../src/query.js";
+import { rebuildStructuralIndex } from "../src/structuralLinks.js";
 import type { EventLogEntry } from "../src/types.js";
 
 function event(overrides: Partial<EventLogEntry>): EventLogEntry {
@@ -230,6 +231,68 @@ describe("legacy weight field migration", () => {
     expect(raw.edges["A|B"].weight).toBeUndefined();
     expect(raw.edges["A|B"].reactivationDays).toEqual([]);
     expect(raw.edges["A|B"].consolidatedScore).toBe(0);
+  });
+});
+
+
+describe("structural-link floor-weight fallback", () => {
+  let dataDir: string;
+  let vaultPath: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-structural-fallback-data-"));
+    vaultPath = await mkdtemp(join(tmpdir(), "vnl-test-structural-fallback-vault-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(vaultPath, { recursive: true, force: true });
+  });
+
+  it("surfaces a wikilinked note with no usage history at the floor weight", async () => {
+    await writeFile(join(vaultPath, "A.md"), "linked to [[B]]", "utf8");
+    await writeFile(join(vaultPath, "B.md"), "body", "utf8");
+    await rebuildStructuralIndex(vaultPath, dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    expect(neighbors).toHaveLength(1);
+    expect(neighbors[0]).toMatchObject({ path: "B", weight: 0.1, source: "structural" });
+  });
+
+  it("prefers the real usage-weighted edge over the structural floor for the same pair", async () => {
+    await writeFile(join(vaultPath, "A.md"), "linked to [[B]]", "utf8");
+    await writeFile(join(vaultPath, "B.md"), "body", "utf8");
+    await rebuildStructuralIndex(vaultPath, dataDir);
+
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 5 }));
+    await compact(dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    expect(neighbors).toHaveLength(1);
+    expect(neighbors[0].source).toBe("usage");
+    expect(neighbors[0].weight).toBeCloseTo(5, 5);
+  });
+
+  it("ranks a real usage neighbor above a structural-only neighbor for the same note", async () => {
+    await writeFile(join(vaultPath, "A.md"), "linked to [[B]] and [[C]]", "utf8");
+    await writeFile(join(vaultPath, "B.md"), "body", "utf8");
+    await writeFile(join(vaultPath, "C.md"), "body", "utf8");
+    await rebuildStructuralIndex(vaultPath, dataDir);
+
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 1 }));
+    await compact(dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    expect(neighbors.map((n) => n.path)).toEqual(["B", "C"]);
+    expect(neighbors.find((n) => n.path === "C")!.source).toBe("structural");
+  });
+
+  it("returns no structural fallback when the structural index hasn't been built", async () => {
+    await writeFile(join(vaultPath, "A.md"), "linked to [[B]]", "utf8");
+    await writeFile(join(vaultPath, "B.md"), "body", "utf8");
+
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    expect(neighbors).toEqual([]);
   });
 });
 

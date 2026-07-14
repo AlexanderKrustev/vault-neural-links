@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendEvent } from "./logger.js";
 import { compact } from "./compactor.js";
+import { rebuildStructuralIndex } from "./structuralLinks.js";
 import { getWeightedNeighbors, computeLiveNeighborWeights } from "./query.js";
 import { activate } from "./activation.js";
 import { resolveDataDir } from "./vaultPaths.js";
@@ -19,6 +20,7 @@ export * from "./decay.js";
 export * from "./priming.js";
 export { appendEvent } from "./logger.js";
 export { compact } from "./compactor.js";
+export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 export { consolidate, runNightlyConsolidation } from "./consolidation.js";
 export { resolveSupersededBy, readSupersession } from "./relations.js";
 export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from "./query.js";
@@ -99,7 +101,13 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     },
 
     async compact(onEvent?: ActivationEventSink) {
-      return compact(vaultDataDir, onEvent);
+      const result = await compact(vaultDataDir, onEvent);
+      // Cheap enough to refresh on every on-demand compaction too, not just
+      // the nightly job — the structural graph only changes when notes are
+      // edited, but there's no signal here for "did any note change since
+      // the last rebuild," so it's simplest to just always redo it.
+      await rebuildStructuralIndex(vaultPath, vaultDataDir);
+      return result;
     },
   };
 }

@@ -1,10 +1,18 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { EdgeRecord, LinkWeightsFile, NoteTypeDecayConfig, WeightedNeighbor } from "./types.js";
+import type {
+  EdgeRecord,
+  LinkWeightsFile,
+  NoteTypeDecayConfig,
+  StructuralFallbackConfig,
+  WeightedNeighbor,
+} from "./types.js";
+import { DEFAULT_STRUCTURAL_FALLBACK_CONFIG } from "./types.js";
 import { decayWeight, resolveHalfLifeDays } from "./decay.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { primingBonus, type SessionBuffer } from "./priming.js";
 import { readSupersession } from "./relations.js";
+import { loadStructuralIndex } from "./structuralLinks.js";
 
 async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null> {
   try {
@@ -70,19 +78,36 @@ export async function computeLiveNeighborWeights(
   note: string,
   vaultPath?: string,
   sessionBuffer?: SessionBuffer,
+  structuralFallback: StructuralFallbackConfig = DEFAULT_STRUCTURAL_FALLBACK_CONFIG,
 ): Promise<WeightedNeighbor[]> {
   const weights = await loadWeights(vaultDataDir);
-  if (!weights) return [];
-
   const now = new Date();
   const neighbors: WeightedNeighbor[] = [];
-  for (const [key, record] of Object.entries(weights.edges)) {
-    const [a, b] = key.split("|");
-    const other = a === note ? b : b === note ? a : undefined;
-    if (other === undefined) continue;
-    const baseWeight = await liveWeight(vaultPath, other, record, now);
-    const weight = sessionBuffer ? baseWeight + primingBonus(other, sessionBuffer) : baseWeight;
-    neighbors.push({ path: other, weight, lastTouched: record.lastTouched });
+  const seen = new Set<string>();
+
+  if (weights) {
+    for (const [key, record] of Object.entries(weights.edges)) {
+      const [a, b] = key.split("|");
+      const other = a === note ? b : b === note ? a : undefined;
+      if (other === undefined) continue;
+      const baseWeight = await liveWeight(vaultPath, other, record, now);
+      const weight = sessionBuffer ? baseWeight + primingBonus(other, sessionBuffer) : baseWeight;
+      neighbors.push({ path: other, weight, lastTouched: record.lastTouched, source: "usage" });
+      seen.add(other);
+    }
+  }
+
+  // Fallback tier: a real wikilink with no usage history yet is still real
+  // evidence of a relationship, so it gets a small floor weight rather than
+  // being invisible to retrieval — only for pairs with no usage-weighted
+  // edge already, so real usage always outranks structural-only presence.
+  const structural = await loadStructuralIndex(vaultDataDir);
+  for (const other of structural?.edges[note] ?? []) {
+    if (seen.has(other)) continue;
+    const weight = sessionBuffer
+      ? structuralFallback.floorWeight + primingBonus(other, sessionBuffer)
+      : structuralFallback.floorWeight;
+    neighbors.push({ path: other, weight, lastTouched: structural!.builtAt, source: "structural" });
   }
 
   return neighbors;

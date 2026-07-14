@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "../src/logger.js";
 import { compact } from "../src/compactor.js";
 import { activate } from "../src/activation.js";
+import { rebuildStructuralIndex } from "../src/structuralLinks.js";
 import type { ActivationTraceEvent, EventLogEntry } from "../src/types.js";
 
 function event(overrides: Partial<EventLogEntry>): EventLogEntry {
@@ -113,6 +114,19 @@ describe("activate (spreading activation)", () => {
 
     const result = await activate(dataDir, "A", 10);
     expect(result.find((n) => n.path === "A")).toBeUndefined();
+  });
+
+  it("spreads through a structural-only (no usage history) edge via the floor-weight fallback", async () => {
+    const vaultPath = await mkdtemp(join(tmpdir(), "vnl-test-activation-vault-"));
+    await writeFile(join(vaultPath, "A.md"), "linked to [[B]] which links to [[C]]", "utf8");
+    await writeFile(join(vaultPath, "B.md"), "linked to [[C]]", "utf8");
+    await writeFile(join(vaultPath, "C.md"), "body", "utf8");
+    await rebuildStructuralIndex(vaultPath, dataDir);
+
+    const result = await activate(dataDir, "A", 10, undefined, vaultPath);
+    expect(result.find((n) => n.path === "B")).toBeDefined();
+
+    await rm(vaultPath, { recursive: true, force: true });
   });
 
   it("emits ordered edge_traversed/node_activated events with a stable runId", async () => {

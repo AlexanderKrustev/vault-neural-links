@@ -6,7 +6,7 @@
 // (via the compact_weights MCP tool), but consolidation promotion must only
 // run on a real once-a-day cadence, or the reactivation threshold would be
 // meaningless.
-import { compact, resolveDataDir, runNightlyConsolidation } from "../dist/index.js";
+import { compact, rebuildStructuralIndex, resolveDataDir, runNightlyConsolidation } from "../dist/index.js";
 
 const vaultPath = process.argv[2];
 if (!vaultPath) {
@@ -24,6 +24,12 @@ compact(vaultDataDir)
   .then((consolidationResult) => {
     console.log(
       `consolidation: ${consolidationResult.promotedCount}/${consolidationResult.edgeCount} edges promoted at ${consolidationResult.consolidatedAt}`,
+    );
+    return rebuildStructuralIndex(vaultPath, vaultDataDir);
+  })
+  .then((structuralResult) => {
+    console.log(
+      `structural index: ${structuralResult.edgeCount} edges across ${structuralResult.noteCount} notes at ${structuralResult.builtAt}`,
     );
   })
   .catch((err) => {

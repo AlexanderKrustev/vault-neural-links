@@ -33,6 +33,8 @@ export interface WeightedNeighbor {
   lastTouched: string;
   /** Set when this note's frontmatter marks it `status: superseded` — surfaces its successor even though its usage weight/recency gives no hint it's outdated. */
   supersededBy?: string;
+  /** "usage" when backed by a real traversal/reinforcement edge, "structural" when this is a wikilink-only fallback with no usage history yet (see structuralLinks.ts). */
+  source: "usage" | "structural";
 }
 
 export interface CompactionResult {
@@ -155,6 +157,33 @@ export interface ActivatedNote {
  * traversal instead of only seeing the final ranked result set.
  */
 export type ActivationEventType = "node_activated" | "edge_traversed";
+
+/**
+ * Persisted bidirectional wikilink adjacency, built by scanning every
+ * note's raw content (see structuralLinks.ts) rather than derived from
+ * usage events — the structural graph exists independently of whether
+ * anyone has ever called log_traversal/reinforce_link on a pair of notes.
+ */
+export interface StructuralLinksFile {
+  version: number;
+  builtAt: string;
+  /** note path -> directly wikilinked note paths (deduped, sorted, bidirectional) */
+  edges: Record<string, string[]>;
+}
+
+/**
+ * Controls the retrieval fallback tier that treats a plain wikilink as
+ * weak-but-real evidence of a relationship, so a note pair with no usage
+ * history yet doesn't score identically to two unrelated notes. Only
+ * applied when no usage-weighted edge already exists for that pair.
+ */
+export interface StructuralFallbackConfig {
+  floorWeight: number;
+}
+
+export const DEFAULT_STRUCTURAL_FALLBACK_CONFIG: StructuralFallbackConfig = {
+  floorWeight: 0.1,
+};
 
 export interface ActivationTraceEvent {
   type: ActivationEventType;
