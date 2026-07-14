@@ -135,6 +135,20 @@ describe("mcp-server tools", () => {
     expect(activated.map((n: { path: string }) => n.path)).toEqual(["B"]);
   });
 
+  it("activate reports which fallback tier served the result", async () => {
+    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
+    await compactWeightsTool.handler(ctx)({});
+
+    const { tier } = parseResult(await activateTool.handler(ctx)({ note: "A" }));
+    expect(tier).toBe("activation");
+  });
+
+  it("activate never throws and reports the recency tier when the origin note has no edges and the vault has no matching notes", async () => {
+    const result = parseResult(await activateTool.handler(ctx)({ note: "Isolated" }));
+    expect(result.tier).toBe("recency");
+    expect(result.activated).toEqual([]);
+  });
+
   it("activate broadcasts every trace event to the activation socket", async () => {
     const broadcast = vi.fn();
     ctx.activationSocket = { port: 0, broadcast, close: async () => {} };

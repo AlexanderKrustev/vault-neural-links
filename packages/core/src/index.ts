@@ -4,6 +4,7 @@ import { compact } from "./compactor.js";
 import { rebuildStructuralIndex } from "./structuralLinks.js";
 import { getWeightedNeighbors, computeLiveNeighborWeights } from "./query.js";
 import { activate } from "./activation.js";
+import { retrieveWithFallback, type RetrievalResult } from "./fallback.js";
 import { resolveDataDir } from "./vaultPaths.js";
 import { SessionBuffer, persistSessionBuffer } from "./priming.js";
 import type {
@@ -25,6 +26,7 @@ export { consolidate, runNightlyConsolidation } from "./consolidation.js";
 export { resolveSupersededBy, readSupersession } from "./relations.js";
 export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from "./query.js";
 export { activate } from "./activation.js";
+export { retrieveWithFallback, type RetrievalResult } from "./fallback.js";
 export { resolveDataDir } from "./vaultPaths.js";
 export * from "./frontmatter.js";
 export * from "./notes.js";
@@ -44,6 +46,12 @@ export interface VaultLinkClient {
     config?: SpreadingActivationConfig,
     onEvent?: ActivationEventSink,
   ): Promise<ActivatedNote[]>;
+  retrieveWithFallback(
+    note: string,
+    energy?: number,
+    config?: SpreadingActivationConfig,
+    onEvent?: ActivationEventSink,
+  ): Promise<RetrievalResult>;
   compact(onEvent?: ActivationEventSink): Promise<CompactionResult>;
 }
 
@@ -98,6 +106,16 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     ) {
       await touch(note);
       return activate(vaultDataDir, note, energy, config, vaultPath, sessionBuffer, onEvent);
+    },
+
+    async retrieveWithFallback(
+      note: string,
+      energy: number = DEFAULT_ACTIVATION_ENERGY,
+      config?: SpreadingActivationConfig,
+      onEvent?: ActivationEventSink,
+    ) {
+      await touch(note);
+      return retrieveWithFallback(vaultDataDir, vaultPath, note, energy, config, sessionBuffer, onEvent);
     },
 
     async compact(onEvent?: ActivationEventSink) {

@@ -58,7 +58,10 @@ export const activateTool = {
       "too — unlike get_weighted_neighbors, which only ever sees direct links. A note reachable " +
       "through several indirect routes accumulates energy from each and can outrank one reachable " +
       "through a single weak direct link. Use this when direct neighbors alone seem to be missing " +
-      "relevant indirect context.",
+      "relevant indirect context. Never returns empty: if spreading activation finds no edges at " +
+      "all (usage-weighted or structural), falls back to a keyword/title match over the vault, and " +
+      "as a last resort to the most recently touched notes. The response's `tier` field reports " +
+      "which of these actually served the result.",
     inputSchema: {
       note: z.string().describe("Vault-relative note path, without .md extension"),
       energy: z.number().positive().optional().describe("Starting energy at the origin note (default 10)"),
@@ -101,11 +104,11 @@ export const activateTool = {
       // callback also broadcasts to any connected sockets so both views can
       // never drift apart.
       const trace: ActivationTraceEvent[] = [];
-      const activated = await ctx.client.activate(note, energy, config, (event) => {
+      const result = await ctx.client.retrieveWithFallback(note, energy, config, (event) => {
         trace.push(event);
         ctx.activationSocket?.broadcast(event);
       });
-      return textResult({ activated, trace });
+      return textResult({ activated: result.notes, tier: result.tier, trace });
     },
 };
 

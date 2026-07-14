@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { parseFrontmatter, serializeNote, type ParsedNote } from "./frontmatter.js";
 import { getWeightedNeighbors } from "./query.js";
@@ -10,7 +10,7 @@ export interface NoteRef {
   body: string;
 }
 
-function toFilePath(vaultPath: string, notePath: string): string {
+export function toFilePath(vaultPath: string, notePath: string): string {
   const withExt = notePath.endsWith(".md") ? notePath : `${notePath}.md`;
   return join(vaultPath, withExt);
 }
@@ -129,6 +129,31 @@ export async function listNotes(vaultPath: string, opts: ListNotesOptions = {}):
 
   await walk(root);
   return results.sort();
+}
+
+export interface RecentNote {
+  path: string;
+  mtime: string;
+}
+
+/**
+ * Notes sorted by file mtime, most recent first. Last-resort retrieval
+ * fallback when a note has neither usage/structural edges nor a keyword
+ * match — mtime is used rather than a frontmatter field since the vault has
+ * no universal "updated" schema, but every note has a filesystem timestamp.
+ */
+export async function mostRecentNotes(vaultPath: string, topK = 10, exclude?: string): Promise<RecentNote[]> {
+  const paths = (await listNotes(vaultPath)).filter((path) => path !== exclude);
+
+  const withMtime = await Promise.all(
+    paths.map(async (path) => {
+      const stats = await stat(toFilePath(vaultPath, path));
+      return { path, mtime: stats.mtime.toISOString() };
+    }),
+  );
+
+  withMtime.sort((a, b) => (a.mtime < b.mtime ? 1 : a.mtime > b.mtime ? -1 : 0));
+  return withMtime.slice(0, topK);
 }
 
 export interface SearchNotesOptions {
