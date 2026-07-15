@@ -2,6 +2,9 @@
   "name": "vault-neural-links",
   "private": true,
   "version": "0.0.0",
+  "scripts": {
+    "build": "npm run build --workspace=packages/core && npm run build --workspace=packages/mcp-server"
+  },
   "workspaces": [
     "packages/*"
   ],
