@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { ActivatedNote, ActivationEventSink, SpreadingActivationConfig } from "./types.js";
-import { DEFAULT_SPREADING_ACTIVATION_CONFIG } from "./types.js";
+import type { AblationLayers, ActivatedNote, ActivationEventSink, SpreadingActivationConfig } from "./types.js";
+import { DEFAULT_ABLATION_LAYERS, DEFAULT_SPREADING_ACTIVATION_CONFIG } from "./types.js";
 import { computeLiveNeighborWeights } from "./query.js";
 import type { SessionBuffer } from "./priming.js";
 
@@ -41,6 +41,7 @@ export async function activate(
   sessionBuffer?: SessionBuffer,
   onEvent?: ActivationEventSink,
   deadline?: number,
+  layers: AblationLayers = DEFAULT_ABLATION_LAYERS,
 ): Promise<ActivatedNote[]> {
   const accumulated = new Map<string, { energy: number; hops: number }>();
   const runId = randomUUID();
@@ -49,7 +50,7 @@ export async function activate(
     if (hop > config.maxHops || currentEnergy < config.structuralMinThreshold) return;
     if (deadline !== undefined && Date.now() >= deadline) return;
 
-    const neighbors = await computeLiveNeighborWeights(vaultDataDir, current, vaultPath, sessionBuffer);
+    const neighbors = await computeLiveNeighborWeights(vaultDataDir, current, vaultPath, sessionBuffer, undefined, undefined, layers);
     const totalWeight = neighbors.reduce((sum, n) => sum + Math.max(n.weight, 0), 0);
     if (totalWeight <= 0) return;
 

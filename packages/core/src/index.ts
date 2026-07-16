@@ -4,10 +4,13 @@ import { compact } from "./compactor.js";
 import { rebuildStructuralIndex } from "./structuralLinks.js";
 import { getWeightedNeighbors, computeLiveNeighborWeights } from "./query.js";
 import { activate } from "./activation.js";
+import { runAblationComparison } from "./ablation.js";
 import { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
 import { resolveDataDir } from "./vaultPaths.js";
 import { SessionBuffer, persistSessionBuffer } from "./priming.js";
 import type {
+  AblationDiffResult,
+  AblationLayers,
   ActivatedNote,
   ActivationEventSink,
   CompactionResult,
@@ -29,6 +32,7 @@ export { runLouvain, loadNoteClusters, runClusterComputation } from "./clusterin
 export { resolveSupersededBy, readSupersession } from "./relations.js";
 export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from "./query.js";
 export { activate } from "./activation.js";
+export { runAblationComparison } from "./ablation.js";
 export { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
 export { resolveDataDir } from "./vaultPaths.js";
 export * from "./frontmatter.js";
@@ -56,6 +60,12 @@ export interface VaultLinkClient {
     onEvent?: ActivationEventSink,
     options?: RetrieveWithFallbackOptions,
   ): Promise<RetrievalResult>;
+  runAblationComparison(
+    note: string,
+    disabledLayers: Partial<AblationLayers>,
+    energy?: number,
+    config?: SpreadingActivationConfig,
+  ): Promise<AblationDiffResult>;
   compact(onEvent?: ActivationEventSink): Promise<CompactionResult>;
 }
 
@@ -133,6 +143,16 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
         relaxations: result.relaxations,
       });
       return result;
+    },
+
+    async runAblationComparison(
+      note: string,
+      disabledLayers: Partial<AblationLayers>,
+      energy: number = DEFAULT_ACTIVATION_ENERGY,
+      config?: SpreadingActivationConfig,
+    ) {
+      await touch(note);
+      return runAblationComparison(vaultDataDir, note, energy, disabledLayers, config, vaultPath, sessionBuffer);
     },
 
     async compact(onEvent?: ActivationEventSink) {

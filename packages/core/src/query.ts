@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
+  AblationLayers,
   EdgeRecord,
   ImportanceConfig,
   LinkWeightsFile,
@@ -8,7 +9,7 @@ import type {
   StructuralFallbackConfig,
   WeightedNeighbor,
 } from "./types.js";
-import { DEFAULT_IMPORTANCE_CONFIG, DEFAULT_STRUCTURAL_FALLBACK_CONFIG } from "./types.js";
+import { DEFAULT_ABLATION_LAYERS, DEFAULT_IMPORTANCE_CONFIG, DEFAULT_STRUCTURAL_FALLBACK_CONFIG } from "./types.js";
 import { decayWeight, resolveHalfLifeDays } from "./decay.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { loadNoteImportance } from "./importance.js";
@@ -55,13 +56,15 @@ async function liveWeight(
   record: EdgeRecord,
   now: Date,
   decayConfig?: NoteTypeDecayConfig,
+  layers: AblationLayers = DEFAULT_ABLATION_LAYERS,
 ): Promise<number> {
   const noteType = vaultPath ? await readNoteType(vaultPath, notePath) : undefined;
   const halfLifeDays = resolveHalfLifeDays(noteType, decayConfig);
   // consolidatedScore is added undecayed — that's the whole point of the
   // long-term tier: once promoted, it resists the recent tier's decay
   // entirely rather than just decaying more slowly.
-  return decayWeight(record.baseStrength, daysSince(record.lastTouched, now), { halfLifeDays }) + record.consolidatedScore;
+  const consolidated = layers.consolidation ? record.consolidatedScore : 0;
+  return decayWeight(record.baseStrength, daysSince(record.lastTouched, now), { halfLifeDays }) + consolidated;
 }
 
 /**
@@ -82,9 +85,10 @@ export async function computeLiveNeighborWeights(
   sessionBuffer?: SessionBuffer,
   structuralFallback: StructuralFallbackConfig = DEFAULT_STRUCTURAL_FALLBACK_CONFIG,
   importanceConfig: ImportanceConfig = DEFAULT_IMPORTANCE_CONFIG,
+  layers: AblationLayers = DEFAULT_ABLATION_LAYERS,
 ): Promise<WeightedNeighbor[]> {
   const weights = await loadWeights(vaultDataDir);
-  const importance = await loadNoteImportance(vaultDataDir);
+  const importance = layers.importance ? await loadNoteImportance(vaultDataDir) : null;
   const now = new Date();
   const neighbors: WeightedNeighbor[] = [];
   const seen = new Set<string>();
@@ -93,8 +97,10 @@ export async function computeLiveNeighborWeights(
   // neighbor's own PageRank-style hub score boosts its weight regardless of
   // usage recency, so a genuine hub note stays weighted even during a long
   // stretch with no traversal/reinforce activity. No-op (multiplier of 1)
-  // until runImportanceComputation has actually populated note-importance.json.
+  // until runImportanceComputation has actually populated note-importance.json,
+  // or when the importance layer is ablated (AIBRAIN-27).
   function withImportance(path: string, weight: number): number {
+    if (!layers.importance) return weight;
     const score = importance?.scores[path] ?? 0;
     return weight * (1 + importanceConfig.blendLambda * score);
   }
@@ -104,8 +110,8 @@ export async function computeLiveNeighborWeights(
       const [a, b] = key.split("|");
       const other = a === note ? b : b === note ? a : undefined;
       if (other === undefined) continue;
-      const baseWeight = await liveWeight(vaultPath, other, record, now);
-      const weight = sessionBuffer ? baseWeight + primingBonus(other, sessionBuffer) : baseWeight;
+      const baseWeight = await liveWeight(vaultPath, other, record, now, undefined, layers);
+      const weight = sessionBuffer && layers.priming ? baseWeight + primingBonus(other, sessionBuffer) : baseWeight;
       neighbors.push({ path: other, weight: withImportance(other, weight), lastTouched: record.lastTouched, source: "usage" });
       seen.add(other);
     }
@@ -115,13 +121,18 @@ export async function computeLiveNeighborWeights(
   // evidence of a relationship, so it gets a small floor weight rather than
   // being invisible to retrieval — only for pairs with no usage-weighted
   // edge already, so real usage always outranks structural-only presence.
-  const structural = await loadStructuralIndex(vaultDataDir);
-  for (const other of structural?.edges[note] ?? []) {
-    if (seen.has(other)) continue;
-    const weight = sessionBuffer
-      ? structuralFallback.floorWeight + primingBonus(other, sessionBuffer)
-      : structuralFallback.floorWeight;
-    neighbors.push({ path: other, weight: withImportance(other, weight), lastTouched: structural!.builtAt, source: "structural" });
+  // Ablatable as a whole (AIBRAIN-27): skipped entirely when
+  // layers.structuralFallback is false.
+  if (layers.structuralFallback) {
+    const structural = await loadStructuralIndex(vaultDataDir);
+    for (const other of structural?.edges[note] ?? []) {
+      if (seen.has(other)) continue;
+      const weight =
+        sessionBuffer && layers.priming
+          ? structuralFallback.floorWeight + primingBonus(other, sessionBuffer)
+          : structuralFallback.floorWeight;
+      neighbors.push({ path: other, weight: withImportance(other, weight), lastTouched: structural!.builtAt, source: "structural" });
+    }
   }
 
   return neighbors;

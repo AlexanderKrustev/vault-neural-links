@@ -194,6 +194,52 @@ export const DEFAULT_STRUCTURAL_FALLBACK_CONFIG: StructuralFallbackConfig = {
   floorWeight: 0.1,
 };
 
+
+/**
+ * Which optional scoring layers contribute to a retrieval run — everything
+ * true reproduces normal retrieval; setting any to false ablates that
+ * layer's contribution so a caller can diff "with" vs "without" (AIBRAIN-27).
+ * The base layer (usage-weighted decay + multi-hop spreading activation
+ * itself) is never ablatable — these are the additive/multiplicative
+ * layers stacked on top of it in computeLiveNeighborWeights/liveWeight.
+ */
+export interface AblationLayers {
+  /** Session-buffer priming bonus (priming.ts). */
+  priming: boolean;
+  /** PageRank-style importance multiplier (importance.ts). */
+  importance: boolean;
+  /** Undecayed long-term consolidated-tier score (consolidation.ts). */
+  consolidation: boolean;
+  /** Structural-only (no-usage-history) floor-weight fallback neighbors. */
+  structuralFallback: boolean;
+}
+
+export const DEFAULT_ABLATION_LAYERS: AblationLayers = {
+  priming: true,
+  importance: true,
+  consolidation: true,
+  structuralFallback: true,
+};
+
+/** A named layer difference between two ablation runs, for AIBRAIN-27's before/after diff panel. */
+export interface AblationDiffEntry {
+  path: string;
+  /** Present in baseline (full layers), absent once the ablated layer(s) are turned off. */
+  status: "removed" | "added" | "reranked";
+  baselineEnergy?: number;
+  ablatedEnergy?: number;
+  baselineHops?: number;
+  ablatedHops?: number;
+}
+
+export interface AblationDiffResult {
+  note: string;
+  disabledLayers: Partial<AblationLayers>;
+  baseline: ActivatedNote[];
+  ablated: ActivatedNote[];
+  diff: AblationDiffEntry[];
+}
+
 export interface ActivationTraceEvent {
   type: ActivationEventType;
   /** Groups every event from one activate() call. */

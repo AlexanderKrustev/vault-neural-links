@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "@vault-neural-links/core";
 import {
+  ablationDiffTool,
   activateTool,
   compactWeightsTool,
   createNoteTool,
@@ -165,6 +166,39 @@ describe("mcp-server tools", () => {
     const { trace } = parseResult(await activateTool.handler(ctx)({ note: "A" }));
     expect(broadcast).toHaveBeenCalledTimes(trace.length);
     expect(broadcast.mock.calls[0][0]).toEqual(trace[0]);
+  });
+
+  it("ablation_diff shows a promoted edge losing energy when consolidation is disabled", async () => {
+    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
+    await reinforceLinkTool.handler(ctx)({ from: "A", to: "C", boost: 10 });
+    await compactWeightsTool.handler(ctx)({});
+
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const raw = JSON.parse(await readFile(join(ctx.vaultDataDir, "link-weights.json"), "utf8"));
+    raw.edges["A|B"].consolidatedScore = 50;
+    await writeFile(join(ctx.vaultDataDir, "link-weights.json"), JSON.stringify(raw), "utf8");
+
+    const result = parseResult(await ablationDiffTool.handler(ctx)({ note: "A", disabledLayers: { consolidation: true } }));
+
+    const baselineB = result.baseline.find((n: { path: string }) => n.path === "B");
+    const ablatedB = result.ablated.find((n: { path: string }) => n.path === "B");
+    expect(ablatedB.energy).toBeLessThan(baselineB.energy);
+    expect(result.diff.some((d: { path: string; status: string }) => d.path === "B" && d.status === "reranked")).toBe(true);
+  });
+
+  it("ablation_diff reports a removed note when structuralFallback is disabled", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(ctx.vaultPath, "A.md"), "linked to [[B]]", "utf8");
+    await writeFile(join(ctx.vaultPath, "B.md"), "body", "utf8");
+    const { rebuildStructuralIndex } = await import("@vault-neural-links/core");
+    await rebuildStructuralIndex(ctx.vaultPath, ctx.vaultDataDir);
+
+    const result = parseResult(
+      await ablationDiffTool.handler(ctx)({ note: "A", disabledLayers: { structuralFallback: true } }),
+    );
+
+    expect(result.ablated.find((n: { path: string }) => n.path === "B")).toBeUndefined();
+    expect(result.diff).toContainEqual(expect.objectContaining({ path: "B", status: "removed" }));
   });
 
   it("log_traversal and reinforce_link each broadcast an edge_traversed event live", async () => {

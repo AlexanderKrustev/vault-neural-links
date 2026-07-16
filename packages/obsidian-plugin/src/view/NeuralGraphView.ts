@@ -9,6 +9,7 @@ import { ForceSim, type NativeEdge } from "./ForceSim.js";
 import { Renderer } from "./Renderer.js";
 import { ActivationPacer } from "./ActivationPacer.js";
 import { RetrievalPathPanel } from "./RetrievalPathPanel.js";
+import { AblationPanel } from "./AblationPanel.js";
 
 export const NEURAL_GRAPH_VIEW_TYPE = "vault-neural-links-view";
 
@@ -22,6 +23,8 @@ export class NeuralGraphView extends ItemView {
   private graphMetadataWatcher: GraphMetadataWatcher | null = null;
   private activationPacer: ActivationPacer | null = null;
   private retrievalPathPanel: RetrievalPathPanel | null = null;
+  private ablationPanel: AblationPanel | null = null;
+  private primedNotes: ReadonlySet<string> = new Set();
   private statusEl: HTMLDivElement | null = null;
   private lastWeights: LinkWeightsFile | null = null;
   private firstLoadDone = false;
@@ -56,7 +59,10 @@ export class NeuralGraphView extends ItemView {
     this.renderer = new Renderer(this.canvas, this.sim);
     this.renderer.setColorScheme(this.plugin.settings.colorScheme);
     this.renderer.setEdgeMaxAgeDays(this.plugin.settings.decayHalfLifeDays);
-    this.renderer.onNodeClicked((path) => this.openNote(path));
+    this.renderer.onNodeClicked((path) => {
+      this.openNote(path);
+      this.ablationPanel?.setNote(path);
+    });
     this.renderer.start();
 
     this.statusEl = container.createDiv({ cls: "vault-neural-links-status" });
@@ -104,10 +110,20 @@ export class NeuralGraphView extends ItemView {
 
     const sessionDir = `${adapter.getBasePath()}/.vault-neural-links/session`;
     this.primedWatcher = new PrimedWatcher(sessionDir);
-    this.primedWatcher.start((primed) => this.renderer?.setPrimedNotes(primed));
+    this.primedWatcher.start((primed) => {
+      this.primedNotes = primed;
+      this.renderer?.setPrimedNotes(primed);
+    });
 
     this.retrievalPathPanel = new RetrievalPathPanel();
     this.retrievalPathPanel.mount(container);
+
+    this.ablationPanel = new AblationPanel(
+      `${adapter.getBasePath()}/.vault-neural-links`,
+      adapter.getBasePath(),
+      () => this.primedNotes,
+    );
+    this.ablationPanel.mount(container);
 
     const pacer = new ActivationPacer();
     pacer.setMode(this.plugin.settings.playbackMode);
@@ -152,6 +168,8 @@ export class NeuralGraphView extends ItemView {
     this.activationPacer = null;
     this.retrievalPathPanel?.unmount();
     this.retrievalPathPanel = null;
+    this.ablationPanel?.unmount();
+    this.ablationPanel = null;
     this.renderer?.stop();
     this.renderer = null;
     this.sim = null;

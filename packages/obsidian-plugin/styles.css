@@ -107,3 +107,110 @@
   white-space: normal;
   word-break: break-word;
 }
+
+.vault-neural-links-ablation-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 50;
+  width: 300px;
+  max-height: 60%;
+  overflow-y: auto;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.vault-neural-links-ablation-panel.is-collapsed {
+  max-height: unset;
+  overflow-y: visible;
+}
+
+.vault-neural-links-ablation-panel.is-collapsed .vault-neural-links-ablation-panel-body {
+  display: none;
+}
+
+.vault-neural-links-ablation-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.vault-neural-links-ablation-panel-toggle {
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.vault-neural-links-ablation-panel-toggle:hover {
+  color: var(--text-normal);
+}
+
+.vault-neural-links-ablation-note-input {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.vault-neural-links-ablation-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.vault-neural-links-ablation-layer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.vault-neural-links-ablation-compare-btn {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.vault-neural-links-ablation-status {
+  color: var(--text-muted);
+}
+
+.vault-neural-links-ablation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.vault-neural-links-ablation-row-sign {
+  font-weight: 700;
+  width: 12px;
+  text-align: center;
+}
+
+.vault-neural-links-ablation-row.is-removed .vault-neural-links-ablation-row-sign {
+  color: var(--text-error);
+}
+
+.vault-neural-links-ablation-row.is-added .vault-neural-links-ablation-row-sign {
+  color: var(--text-success);
+}
+
+.vault-neural-links-ablation-row.is-reranked .vault-neural-links-ablation-row-sign {
+  color: var(--text-warning, var(--text-accent));
+}
+
+.vault-neural-links-ablation-row-path {
+  flex: 1;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.vault-neural-links-ablation-row-energy {
+  color: var(--text-muted);
+  white-space: nowrap;
+}

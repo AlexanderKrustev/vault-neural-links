@@ -143,6 +143,82 @@ export const activateTool = {
     },
 };
 
+
+export const ablationDiffTool = {
+  name: "ablation_diff",
+  config: {
+    title: "Ablation diff",
+    description:
+      "Runs activate() twice for a note — once with every scoring layer on (baseline) and once " +
+      "with the given layers turned off — and returns the diff between the two result sets, so a " +
+      "reviewer can see concretely what a layer (session priming, PageRank importance, long-term " +
+      "consolidation, or the structural/wikilink floor-weight fallback) actually contributes to " +
+      "retrieval, rather than taking the mechanism's existence on faith. `removed` entries only " +
+      "activated because of a disabled layer; `added` entries only cleared threshold once that " +
+      "layer's contribution was taken out of other neighbors' energy shares; `reranked` entries " +
+      "activated in both runs but with a materially different energy.",
+    inputSchema: {
+      note: z.string().describe("Vault-relative note path, without .md extension"),
+      disabledLayers: z
+        .object({
+          priming: z.boolean().optional(),
+          importance: z.boolean().optional(),
+          consolidation: z.boolean().optional(),
+          structuralFallback: z.boolean().optional(),
+        })
+        .describe("Which layers to turn off for the ablated run (true = disable that layer). Unset layers stay enabled."),
+      energy: z.number().positive().optional().describe("Starting energy at the origin note (default 10)"),
+      maxHops: z.number().int().positive().max(3).optional().describe("Max hops from the origin note (default 3)"),
+      minThreshold: z.number().positive().optional().describe("Energy cutoff below which propagation/inclusion stops for usage-weighted edges (default 0.5)"),
+      structuralMinThreshold: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Energy cutoff below which propagation/inclusion stops for structural-only (floor-weight) edges (default 0.05)"),
+    },
+  },
+  handler:
+    (ctx: ToolContext) =>
+    async ({
+      note,
+      disabledLayers,
+      energy,
+      maxHops,
+      minThreshold,
+      structuralMinThreshold,
+    }: {
+      note: string;
+      disabledLayers: { priming?: boolean; importance?: boolean; consolidation?: boolean; structuralFallback?: boolean };
+      energy?: number;
+      maxHops?: number;
+      minThreshold?: number;
+      structuralMinThreshold?: number;
+    }) => {
+      const config =
+        maxHops !== undefined || minThreshold !== undefined || structuralMinThreshold !== undefined
+          ? {
+              ...DEFAULT_SPREADING_ACTIVATION_CONFIG,
+              ...(maxHops !== undefined && { maxHops }),
+              ...(minThreshold !== undefined && { minThreshold }),
+              ...(structuralMinThreshold !== undefined && { structuralMinThreshold }),
+            }
+          : undefined;
+
+      // The tool's own input convention is "true = disable that layer" (the
+      // intuitive reading of a param literally named disabledLayers); core's
+      // runAblationComparison instead takes a Partial<AblationLayers> override
+      // where you supply the desired (false) state directly, so translate here.
+      const layerOverrides = Object.fromEntries(
+        Object.entries(disabledLayers)
+          .filter(([, disabled]) => disabled === true)
+          .map(([layer]) => [layer, false]),
+      );
+
+      const result = await ctx.client.runAblationComparison(note, layerOverrides, energy, config);
+      return textResult(result);
+    },
+};
+
 export const getEdgeWeightTool = {
   name: "get_edge_weight",
   config: {

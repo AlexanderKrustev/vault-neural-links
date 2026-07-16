@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { runNightlyIfStale } from "@vault-neural-links/core";
 import { startActivationSocketServer } from "./activationSocket.js";
 import {
+  ablationDiffTool,
   activateTool,
   compactWeightsTool,
   createNoteTool,
@@ -55,6 +56,7 @@ const server = new McpServer({
 
 server.registerTool(getWeightedNeighborsTool.name, getWeightedNeighborsTool.config, getWeightedNeighborsTool.handler(ctx));
 server.registerTool(activateTool.name, activateTool.config, activateTool.handler(ctx));
+server.registerTool(ablationDiffTool.name, ablationDiffTool.config, ablationDiffTool.handler(ctx));
 server.registerTool(getEdgeWeightTool.name, getEdgeWeightTool.config, getEdgeWeightTool.handler(ctx));
 server.registerTool(logTraversalTool.name, logTraversalTool.config, logTraversalTool.handler(ctx));
 server.registerTool(reinforceLinkTool.name, reinforceLinkTool.config, reinforceLinkTool.handler(ctx));
