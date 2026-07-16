@@ -5,13 +5,37 @@ export interface ClusterEdge {
 }
 
 /**
+ * Turns an arbitrary label-per-node map (community labels, string cluster
+ * ids, whatever) into small integer indices ordered by descending cluster
+ * size — shared by computeClusters below and by ForceSim when it has a
+ * real Louvain assignment (see note-clusters.json / AIBRAIN-22) to rank,
+ * so both sources feed the cluster-anchor force and node color the same
+ * deterministic way.
+ */
+export function rankClustersBySize(labelOf: ReadonlyMap<string, string>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const l of labelOf.values()) counts.set(l, (counts.get(l) ?? 0) + 1);
+  const sortedLabels = [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([l]) => l);
+  const clusterIndex = new Map<string, number>();
+  sortedLabels.forEach((l, i) => clusterIndex.set(l, i));
+
+  const result = new Map<string, number>();
+  for (const [id, l] of labelOf) result.set(id, clusterIndex.get(l)!);
+  return result;
+}
+
+/**
  * Deterministic (unshuffled) label-propagation community detection: cheap
- * approximation of Louvain/Leiden (tracked separately as AIBRAIN-22 for the
- * real modularity-optimizing version) used here only to give the force
- * layout distinct blobs to pull toward instead of one hairball. Iteration
- * order is fixed by sorted id rather than randomized so the same graph
- * yields the same partition on every call — random shuffling would make
- * the layout reshuffle its clusters on every weights-file update.
+ * approximation of the real modularity-optimizing Louvain now computed
+ * server-side in note-clusters.json (see packages/core/src/clustering.ts,
+ * AIBRAIN-22). ForceSim prefers that real assignment when it's loaded and
+ * only falls back to this client-side approximation when it isn't yet
+ * available (nightly job hasn't run, or a note is missing from its
+ * output) — this still gives the force layout distinct blobs to pull
+ * toward instead of one hairball in that case. Iteration order is fixed by
+ * sorted id rather than randomized so the same graph yields the same
+ * partition on every call — random shuffling would make the layout
+ * reshuffle its clusters on every weights-file update.
  *
  * Returns a map from node id to a small integer cluster index, ordered by
  * descending cluster size (0 = largest), for every id in `ids` that has at
@@ -62,13 +86,5 @@ export function computeClusters(ids: readonly string[], edges: readonly ClusterE
     if (!changed) break;
   }
 
-  const counts = new Map<string, number>();
-  for (const l of label.values()) counts.set(l, (counts.get(l) ?? 0) + 1);
-  const sortedLabels = [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([l]) => l);
-  const clusterIndex = new Map<string, number>();
-  sortedLabels.forEach((l, i) => clusterIndex.set(l, i));
-
-  const result = new Map<string, number>();
-  for (const [id, l] of label) result.set(id, clusterIndex.get(l)!);
-  return result;
+  return rankClustersBySize(label);
 }

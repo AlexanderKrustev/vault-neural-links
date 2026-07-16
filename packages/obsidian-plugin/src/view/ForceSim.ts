@@ -8,7 +8,7 @@ import {
   type Force,
 } from "d3-force";
 import type { LinkWeightsFile } from "@vault-neural-links/core";
-import { computeClusters } from "./Clustering.js";
+import { computeClusters, rankClustersBySize } from "./Clustering.js";
 
 // baseStrength is undecayed — decay is applied live here rather than at
 // compaction (see packages/core/src/query.ts for the same formula, used by
@@ -63,10 +63,19 @@ export const NODE_BASE_RADIUS = 6;
 const NODE_DEGREE_SCALE = 3;
 const NODE_MAX_RADIUS = 22;
 const ISOLATED_RING_MARGIN = 24;
+// A note with peak importance (1.0, the single most-linked note vault-wide,
+// see note-importance.json / AIBRAIN-21) renders up to this much larger
+// than its degree alone would draw it — degree reflects local connectivity
+// in this rendered subgraph, importance reflects hub status across the
+// whole structural graph, so a locally sparse but globally central note
+// still stands out.
+const IMPORTANCE_RADIUS_BOOST = 1.2;
 
-/** Dot size grows with connection count — shared by layout collision and rendering. */
-export function nodeRadius(degree: number): number {
-  return Math.min(NODE_MAX_RADIUS, NODE_BASE_RADIUS + Math.log2(degree + 1) * NODE_DEGREE_SCALE);
+/** Dot size grows with connection count and (optionally) PageRank-style importance — shared by layout collision and rendering. */
+export function nodeRadius(degree: number, importance = 0): number {
+  const degreeRadius = Math.min(NODE_MAX_RADIUS, NODE_BASE_RADIUS + Math.log2(degree + 1) * NODE_DEGREE_SCALE);
+  const clampedImportance = Math.max(0, Math.min(1, importance));
+  return degreeRadius * (1 + clampedImportance * IMPORTANCE_RADIUS_BOOST);
 }
 
 function createJitterForce(): Force<SimNode, SimEdge> {
@@ -187,6 +196,13 @@ export class ForceSim {
   private lastTouched = new Map<string, string>();
   /** max consolidatedScore across each note's incident neural edges — >0 means "consolidated into long-term memory" */
   private consolidated = new Map<string, number>();
+  /** min-max normalized PageRank score per note, from note-importance.json (see setGraphMetadata); 0 for notes not yet scored. */
+  private importance = new Map<string, number>();
+  /** real Louvain assignment from note-clusters.json (see setGraphMetadata), null until the nightly job has run at least once. */
+  private backendClusters: Record<string, string> | null = null;
+  /** small integer cluster index per node id, ranked by descending cluster size — recomputed in setData from either backendClusters or the client-side computeClusters fallback. */
+  private clusterOf = new Map<string, number>();
+  private clusterCount = 0;
   private tickCallback: ((nodes: SimNode[]) => void) | null = null;
   private continuousAnimation = false;
   /** carried across setData calls so unchanged notes keep their position instead of re-exploding */
@@ -221,6 +237,32 @@ export class ForceSim {
   /** Highest consolidatedScore across this note's incident neural edges; 0 if never promoted. */
   getConsolidatedScore(id: string): number {
     return this.consolidated.get(id) ?? 0;
+  }
+
+  /** Min-max normalized PageRank importance (0-1); 0 for notes not yet scored by the nightly job. */
+  getImportance(id: string): number {
+    return this.importance.get(id) ?? 0;
+  }
+
+  /** Small integer cluster index (0 = largest community), or undefined if this node isn't part of any detected cluster. */
+  getCluster(id: string): number | undefined {
+    return this.clusterOf.get(id);
+  }
+
+  getClusterCount(): number {
+    return this.clusterCount;
+  }
+
+  /**
+   * Feeds in the latest note-importance.json / note-clusters.json snapshots
+   * (see GraphMetadataWatcher). Only updates the maps the renderer reads for
+   * node size/color — doesn't touch layout/positions, so this can land at
+   * any time independent of setData's own (much more frequent) weights-file
+   * driven updates.
+   */
+  setGraphMetadata(importance: Record<string, number> | null, clusters: Record<string, string> | null): void {
+    this.importance = new Map(Object.entries(importance ?? {}));
+    this.backendClusters = clusters && Object.keys(clusters).length > 0 ? clusters : null;
   }
 
   /** Records a live node_activated event for the activation ring to render; expiry/filtering by age is Renderer's job. */
@@ -307,15 +349,30 @@ export class ForceSim {
     }
     this.degree = degree;
 
-    const clusterEdges = edges.map((e) => ({
-      source: e.source as string,
-      target: e.target as string,
-      // native (wikilink) edges carry no usage weight — treat them as a
-      // fixed moderate pull so structural links still shape communities
-      weight: e.kind === "native" ? 1 : e.weight,
-    }));
-    const clusterOf = computeClusters([...ids], clusterEdges);
+    let clusterOf: Map<string, number>;
+    if (this.backendClusters) {
+      // real Louvain assignment (AIBRAIN-22) — nodes missing from it (added
+      // since the last nightly run, or with no structural links yet) are
+      // simply left unassigned, same as computeClusters omitting degree-0 ids.
+      const label = new Map<string, string>();
+      for (const id of ids) {
+        const l = this.backendClusters[id];
+        if (l !== undefined) label.set(id, l);
+      }
+      clusterOf = rankClustersBySize(label);
+    } else {
+      const clusterEdges = edges.map((e) => ({
+        source: e.source as string,
+        target: e.target as string,
+        // native (wikilink) edges carry no usage weight — treat them as a
+        // fixed moderate pull so structural links still shape communities
+        weight: e.kind === "native" ? 1 : e.weight,
+      }));
+      clusterOf = computeClusters([...ids], clusterEdges);
+    }
     const clusterCount = new Set(clusterOf.values()).size;
+    this.clusterOf = clusterOf;
+    this.clusterCount = clusterCount;
 
     const lastTouched = new Map<string, string>();
     for (const e of neuralEdges) {
@@ -346,7 +403,7 @@ export class ForceSim {
           .strength((d) => (d.kind === "native" ? 0.05 : 0.25)),
       )
       .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide((d) => nodeRadius(degree.get(d.id) ?? 0) + 8))
+      .force("collide", forceCollide((d) => nodeRadius(degree.get(d.id) ?? 0, this.importance.get(d.id) ?? 0) + 8))
       // notes with no connections at all are kept at or beyond the reach of
       // the connected cluster, instead of drifting in among it
       .force("isolate", createIsolateRingForce(degree))

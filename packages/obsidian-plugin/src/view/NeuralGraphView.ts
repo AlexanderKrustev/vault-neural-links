@@ -4,6 +4,7 @@ import type VaultNeuralLinksPlugin from "../main.js";
 import { WeightsWatcher } from "../WeightsWatcher.js";
 import { PrimedWatcher } from "../PrimedWatcher.js";
 import { ActivationSocketWatcher } from "../ActivationSocketWatcher.js";
+import { GraphMetadataWatcher, type GraphMetadata } from "../GraphMetadataWatcher.js";
 import { ForceSim, type NativeEdge } from "./ForceSim.js";
 import { Renderer } from "./Renderer.js";
 import { ActivationPacer } from "./ActivationPacer.js";
@@ -18,6 +19,7 @@ export class NeuralGraphView extends ItemView {
   private watcher: WeightsWatcher | null = null;
   private primedWatcher: PrimedWatcher | null = null;
   private activationSocketWatcher: ActivationSocketWatcher | null = null;
+  private graphMetadataWatcher: GraphMetadataWatcher | null = null;
   private activationPacer: ActivationPacer | null = null;
   private retrievalPathPanel: RetrievalPathPanel | null = null;
   private statusEl: HTMLDivElement | null = null;
@@ -95,6 +97,11 @@ export class NeuralGraphView extends ItemView {
       (err) => this.onWeightsError(err),
     );
 
+    const importancePath = `${adapter.getBasePath()}/.vault-neural-links/note-importance.json`;
+    const clustersPath = `${adapter.getBasePath()}/.vault-neural-links/note-clusters.json`;
+    this.graphMetadataWatcher = new GraphMetadataWatcher(importancePath, clustersPath);
+    this.graphMetadataWatcher.start((metadata) => this.onGraphMetadataChanged(metadata));
+
     const sessionDir = `${adapter.getBasePath()}/.vault-neural-links/session`;
     this.primedWatcher = new PrimedWatcher(sessionDir);
     this.primedWatcher.start((primed) => this.renderer?.setPrimedNotes(primed));
@@ -122,9 +129,21 @@ export class NeuralGraphView extends ItemView {
     this.retrievalPathPanel?.logEvent(event);
   }
 
+  /** Node size (PageRank importance) and node color (Louvain cluster) don't move layout, so this reuses the same setData path as applySettings rather than a bespoke partial-update method. */
+  private onGraphMetadataChanged(metadata: GraphMetadata): void {
+    if (!this.sim) return;
+    this.sim.setGraphMetadata(metadata.importance?.scores ?? null, metadata.clusters?.clusters ?? null);
+    if (this.lastWeights) {
+      const notePaths = this.app.vault.getMarkdownFiles().map((f) => f.path.replace(/\.md$/, ""));
+      this.sim.setData(notePaths, this.lastWeights, this.getNativeEdges(), this.plugin.settings.minWeightFilter);
+    }
+  }
+
   async onClose(): Promise<void> {
     this.watcher?.stop();
     this.watcher = null;
+    this.graphMetadataWatcher?.stop();
+    this.graphMetadataWatcher = null;
     this.primedWatcher?.stop();
     this.primedWatcher = null;
     this.activationSocketWatcher?.stop();
