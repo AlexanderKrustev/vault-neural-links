@@ -9,6 +9,7 @@ import {
 } from "d3-force";
 import type { LinkWeightsFile } from "@vault-neural-links/core";
 import { computeClusters, rankClustersBySize } from "./Clustering.js";
+import { computeClusterHues, type ClusterAdjacency } from "./ClusterColors.js";
 
 // baseStrength is undecayed — decay is applied live here rather than at
 // compaction (see packages/core/src/query.ts for the same formula, used by
@@ -138,6 +139,31 @@ function createIsolateRingForce(degree: Map<string, number>): Force<SimNode, Sim
   return force;
 }
 
+/**
+ * Sums edge weight between each pair of distinct clusters (same-cluster
+ * edges excluded) so orderClustersByConnection/computeClusterHues (see
+ * ClusterColors.ts) can put strongly inter-linked communities in the same
+ * hue family instead of scattering them across the wheel by raw index.
+ * Native (wikilink) edges carry no usage weight — same fixed moderate pull
+ * used elsewhere for structural-only edges — so they still count toward
+ * "these two communities are related" even absent usage history.
+ */
+function computeClusterAdjacency(edges: readonly SimEdge[], clusterOf: Map<string, number>): ClusterAdjacency[] {
+  const weight = new Map<string, number>();
+  for (const e of edges) {
+    const a = clusterOf.get(e.source as string);
+    const b = clusterOf.get(e.target as string);
+    if (a === undefined || b === undefined || a === b) continue;
+    const w = e.kind === "native" ? 1 : e.weight;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    weight.set(key, (weight.get(key) ?? 0) + w);
+  }
+  return [...weight.entries()].map(([key, w]) => {
+    const [a, b] = key.split("|").map(Number);
+    return { a, b, weight: w };
+  });
+}
+
 const CLUSTER_FORCE_STRENGTH = 0.025;
 const CLUSTER_ANCHOR_SPACING = 55;
 
@@ -203,6 +229,8 @@ export class ForceSim {
   /** small integer cluster index per node id, ranked by descending cluster size — recomputed in setData from either backendClusters or the client-side computeClusters fallback. */
   private clusterOf = new Map<string, number>();
   private clusterCount = 0;
+  /** cluster index -> hue (0-359), ordered so strongly inter-linked clusters share a hue family (see ClusterColors.ts) */
+  private clusterHues = new Map<number, number>();
   private tickCallback: ((nodes: SimNode[]) => void) | null = null;
   private continuousAnimation = false;
   /** carried across setData calls so unchanged notes keep their position instead of re-exploding */
@@ -251,6 +279,11 @@ export class ForceSim {
 
   getClusterCount(): number {
     return this.clusterCount;
+  }
+
+  /** Hue (0-359) for a cluster index, chosen so strongly inter-linked clusters land in the same hue family; undefined only if the index is out of range. */
+  getClusterHue(clusterIndex: number): number | undefined {
+    return this.clusterHues.get(clusterIndex);
   }
 
   /**
@@ -373,6 +406,7 @@ export class ForceSim {
     const clusterCount = new Set(clusterOf.values()).size;
     this.clusterOf = clusterOf;
     this.clusterCount = clusterCount;
+    this.clusterHues = computeClusterHues(clusterCount, computeClusterAdjacency(edges, clusterOf));
 
     const lastTouched = new Map<string, string>();
     for (const e of neuralEdges) {

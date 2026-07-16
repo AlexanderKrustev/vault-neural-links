@@ -47,13 +47,12 @@ const WEIGHT_GRADIENTS: Record<ColorScheme, readonly [number, number, number][]>
   ],
 };
 
-// Golden-angle hue spacing gives well-separated distinct colors for an
-// arbitrary, a-priori-unknown number of clusters — no need to know the
-// total cluster count up front the way an even 360/count split would.
-const CLUSTER_HUE_STEP = 137.508;
+// Fallback only for a cluster index ForceSim hasn't assigned a hue to yet
+// (shouldn't normally happen — getClusterHue covers every index in
+// 0..clusterCount-1 — but golden-angle spacing keeps it distinct if it does).
+const CLUSTER_HUE_FALLBACK_STEP = 137.508;
 
-function clusterColor(clusterIndex: number, alpha: number): string {
-  const hue = (clusterIndex * CLUSTER_HUE_STEP) % 360;
+function clusterColor(hue: number, alpha: number): string {
   return `hsla(${hue}, 60%, 62%, ${alpha})`;
 }
 
@@ -313,10 +312,11 @@ export class Renderer {
       const nodeAlpha = Math.min(1, 0.35 + nodeFreshness * 0.65);
 
       const cluster = this.sim.getCluster(node.id);
+      const clusterHue = cluster !== undefined ? (this.sim.getClusterHue(cluster) ?? (cluster * CLUSTER_HUE_FALLBACK_STEP) % 360) : undefined;
       const fillStyle = isHovered
         ? "rgba(255, 200, 80, 0.95)"
-        : cluster !== undefined
-          ? clusterColor(cluster, nodeAlpha)
+        : clusterHue !== undefined
+          ? clusterColor(clusterHue, nodeAlpha)
           : `rgba(220, 220, 230, ${nodeAlpha})`;
 
       ctx.beginPath();
