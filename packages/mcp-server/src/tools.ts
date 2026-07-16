@@ -210,7 +210,7 @@ export const compactWeightsTool = {
       "when a just-called reinforce_link or recent reads should be reflected right away.",
     inputSchema: {},
   },
-  handler: (ctx: ToolContext) => async () => {
+  handler: (ctx: ToolContext) => async (_args: Record<string, never>) => {
     const result = await ctx.client.compact((event) => ctx.activationSocket?.broadcast(event));
     return textResult(result);
   },

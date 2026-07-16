@@ -10,6 +10,7 @@ import {
   compact,
   rebuildStructuralIndex,
   resolveDataDir,
+  runClusterComputation,
   runImportanceComputation,
   runNightlyConsolidation,
 } from "../dist/index.js";
@@ -41,6 +42,12 @@ compact(vaultDataDir)
   })
   .then((importanceResult) => {
     console.log(`importance: ${importanceResult.noteCount} notes scored at ${importanceResult.computedAt}`);
+    return runClusterComputation(vaultDataDir);
+  })
+  .then((clusteringResult) => {
+    console.log(
+      `clustering: ${clusteringResult.noteCount} notes into ${clusteringResult.clusterCount} clusters at ${clusteringResult.computedAt}`,
+    );
   })
   .catch((err) => {
     console.error(err);

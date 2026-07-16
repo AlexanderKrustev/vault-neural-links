@@ -25,6 +25,7 @@ export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } fro
 export { consolidate, runNightlyConsolidation } from "./consolidation.js";
 export { runNightlyIfStale, type NightlyRunResult } from "./nightlyScheduler.js";
 export { computePageRank, normalizeImportance, loadNoteImportance, runImportanceComputation } from "./importance.js";
+export { runLouvain, loadNoteClusters, runClusterComputation } from "./clustering.js";
 export { resolveSupersededBy, readSupersession } from "./relations.js";
 export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from "./query.js";
 export { activate } from "./activation.js";

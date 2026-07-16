@@ -258,6 +258,43 @@ export interface ImportanceResult {
   computedAt: string;
 }
 
+/**
+ * Controls periodic (batch, not per-query) Louvain-style community
+ * detection over the structural (wikilink) graph. Unlike importance, this
+ * feeds the visualization layer (node color / cluster grouping) rather than
+ * retrieval scoring directly — see clustering.ts.
+ */
+export interface ClusteringConfig {
+  /** Standard Louvain resolution parameter; higher values favor more, smaller communities. */
+  resolution: number;
+  /** Hard cap on aggregation levels, so a pathological graph can't loop indefinitely. */
+  maxLevels: number;
+}
+
+export const DEFAULT_CLUSTERING_CONFIG: ClusteringConfig = {
+  resolution: 1.0,
+  maxLevels: 10,
+};
+
+/**
+ * Persisted cluster assignment per note (see clustering.ts) — cluster ids
+ * are arbitrary stable strings, not meaningful labels. Recomputed
+ * periodically (see bin/vnl-nightly.js), read at query time rather than
+ * computed live.
+ */
+export interface NoteClustersFile {
+  version: number;
+  computedAt: string;
+  /** note path -> cluster id */
+  clusters: Record<string, string>;
+}
+
+export interface ClusteringResult {
+  noteCount: number;
+  clusterCount: number;
+  computedAt: string;
+}
+
 export interface RetrievalLogEntry {
   ts: string;
   instance: string;

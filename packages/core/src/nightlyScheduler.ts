@@ -2,6 +2,7 @@ import { compact } from "./compactor.js";
 import { rebuildStructuralIndex } from "./structuralLinks.js";
 import { runNightlyConsolidation } from "./consolidation.js";
 import { loadNoteImportance, runImportanceComputation } from "./importance.js";
+import { runClusterComputation } from "./clustering.js";
 import type { ActivationEventSink } from "./types.js";
 
 export interface NightlyRunResult {
@@ -10,6 +11,7 @@ export interface NightlyRunResult {
   promotedCount?: number;
   structuralEdgeCount?: number;
   noteCount?: number;
+  clusterCount?: number;
   computedAt?: string;
 }
 
@@ -41,6 +43,7 @@ export async function runNightlyIfStale(
   const consolidation = await runNightlyConsolidation(vaultDataDir, undefined, now);
   const structural = await rebuildStructuralIndex(vaultPath, vaultDataDir);
   const importance = await runImportanceComputation(vaultDataDir, undefined, now);
+  const clustering = await runClusterComputation(vaultDataDir, undefined, now);
 
   return {
     ran: true,
@@ -48,6 +51,7 @@ export async function runNightlyIfStale(
     promotedCount: consolidation.promotedCount,
     structuralEdgeCount: structural.edgeCount,
     noteCount: importance.noteCount,
+    clusterCount: clustering.clusterCount,
     computedAt: importance.computedAt,
   };
 }
