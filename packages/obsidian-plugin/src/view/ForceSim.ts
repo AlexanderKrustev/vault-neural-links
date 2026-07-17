@@ -166,6 +166,12 @@ function computeClusterAdjacency(edges: readonly SimEdge[], clusterOf: Map<strin
 
 const CLUSTER_FORCE_STRENGTH = 0.025;
 const CLUSTER_ANCHOR_SPACING = 55;
+const INTRA_CLUSTER_RADIAL_STRENGTH = 0.06;
+// Distance from its own cluster's anchor at which a zero-importance node
+// settles; a max-importance (1.0) node settles at the anchor itself. Keeps
+// each cluster's "star" contained well inside CLUSTER_ANCHOR_SPACING's
+// inter-cluster gap rather than bleeding into neighboring regions.
+const INTRA_CLUSTER_MAX_RADIUS = 90;
 
 /**
  * Nudges each connected node toward an anchor point shared by its detected
@@ -173,8 +179,17 @@ const CLUSTER_ANCHOR_SPACING = 55;
  * separate into their own blobs instead of collapsing into one hairball.
  * Deliberately weak relative to charge/link/collide — it biases layout,
  * it doesn't dictate it, so within-cluster structure stays organic.
+ *
+ * Within each region, a second radial component pulls higher-importance
+ * (PageRank) nodes toward the region's own anchor and lower-importance
+ * nodes toward its rim, so each cluster forms a small star of its own
+ * rather than a flat, undifferentiated blob.
  */
-function createClusterForce(clusterOf: Map<string, number>, clusterCount: number): Force<SimNode, SimEdge> {
+function createClusterForce(
+  clusterOf: Map<string, number>,
+  clusterCount: number,
+  importance: Map<string, number>,
+): Force<SimNode, SimEdge> {
   let nodes: SimNode[] = [];
   const radius = CLUSTER_ANCHOR_SPACING * Math.max(1, Math.sqrt(clusterCount));
   const anchors: [number, number][] = [];
@@ -185,12 +200,25 @@ function createClusterForce(clusterOf: Map<string, number>, clusterCount: number
 
   const force: Force<SimNode, SimEdge> = (alpha) => {
     const k = CLUSTER_FORCE_STRENGTH * alpha;
+    const rk = INTRA_CLUSTER_RADIAL_STRENGTH * alpha;
     for (const n of nodes) {
       const cluster = clusterOf.get(n.id);
       if (cluster === undefined || n.x === undefined || n.y === undefined) continue;
       const [ax, ay] = anchors[cluster];
       n.vx = (n.vx ?? 0) + (ax - n.x) * k;
       n.vy = (n.vy ?? 0) + (ay - n.y) * k;
+
+      // radial pull within the region: important nodes settle near the
+      // anchor (the region's own center), unimportant ones toward its rim —
+      // so each cluster reads as its own mini star instead of a flat blob
+      const dx = n.x - ax;
+      const dy = n.y - ay;
+      const dist = Math.hypot(dx, dy) || 0.0001;
+      const imp = Math.max(0, Math.min(1, importance.get(n.id) ?? 0));
+      const targetDist = INTRA_CLUSTER_MAX_RADIUS * (1 - imp);
+      const diff = targetDist - dist;
+      n.vx = (n.vx ?? 0) + (dx / dist) * diff * rk;
+      n.vy = (n.vy ?? 0) + (dy / dist) * diff * rk;
     }
   };
   force.initialize = (initNodes) => {
@@ -443,7 +471,7 @@ export class ForceSim {
       .force("isolate", createIsolateRingForce(degree))
       // pulls each detected community toward its own anchor so topic groups
       // visually separate instead of collapsing into one dense hairball
-      .force("cluster", clusterCount > 1 ? createClusterForce(clusterOf, clusterCount) : null);
+      .force("cluster", clusterCount > 1 ? createClusterForce(clusterOf, clusterCount, this.importance) : null);
 
     // incremental updates start from a mild reheat, not a full cold-start alpha=1,
     // since reused nodes already have sensible positions
