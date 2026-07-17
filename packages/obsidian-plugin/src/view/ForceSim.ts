@@ -166,7 +166,11 @@ function computeClusterAdjacency(edges: readonly SimEdge[], clusterOf: Map<strin
 
 const CLUSTER_FORCE_STRENGTH = 0.025;
 const CLUSTER_ANCHOR_SPACING = 55;
-const INTRA_CLUSTER_RADIAL_STRENGTH = 0.06;
+// Higher than CLUSTER_FORCE_STRENGTH: this force must be strong enough to
+// visibly out-compete forceManyBody's charge (-220) and forceCollide,
+// which otherwise keep every node evenly pushed apart regardless of
+// importance and wash out the intended center-to-rim gradient.
+const INTRA_CLUSTER_RADIAL_STRENGTH = 0.18;
 // Distance from its own cluster's anchor at which a zero-importance node
 // settles; a max-importance (1.0) node settles at the anchor itself. Keeps
 // each cluster's "star" contained well inside CLUSTER_ANCHOR_SPACING's

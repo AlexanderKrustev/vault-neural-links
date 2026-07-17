@@ -152,6 +152,12 @@ export class NeuralGraphView extends ItemView {
     if (this.lastWeights) {
       const notePaths = this.app.vault.getMarkdownFiles().map((f) => f.path.replace(/\.md$/, ""));
       this.sim.setData(notePaths, this.lastWeights, this.getNativeEdges(), this.plugin.settings.minWeightFilter);
+      // setData's own incremental reheat (alpha 0.3) is tuned for small
+      // weights-file deltas on an already-organized layout. Metadata usually
+      // lands after the initial layout already settled with everyone at
+      // importance 0, so the star-by-importance positions need a much
+      // stronger restart to actually reorganize against charge/collide.
+      this.sim.reheat(1);
     }
   }
 
