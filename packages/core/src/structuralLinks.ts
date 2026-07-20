@@ -2,8 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { StructuralLinksFile } from "./types.js";
-import { extractWikilinks } from "./parser.js";
-import { listNotes, readNote } from "./notes.js";
+import { createObsidianAdapter, type SourceAdapter } from "./adapters.js";
 
 const STRUCTURAL_LINKS_FILE_VERSION = 1;
 const STRUCTURAL_LINKS_FILE_NAME = "structural-links.json";
@@ -17,15 +16,18 @@ const STRUCTURAL_LINKS_FILE_NAME = "structural-links.json";
  * folders) are dropped rather than guessed at, since a wrong resolution
  * would silently wire unrelated notes together.
  */
-export async function buildStructuralIndex(vaultPath: string): Promise<StructuralLinksFile> {
-  const paths = await listNotes(vaultPath);
+export async function buildStructuralIndex(
+  vaultPath: string,
+  adapter: SourceAdapter = createObsidianAdapter(vaultPath),
+): Promise<StructuralLinksFile> {
+  const nodes = await adapter.listNodes();
 
   const byPathLower = new Map<string, string>();
   const byTitleLower = new Map<string, string[]>();
-  for (const path of paths) {
-    byPathLower.set(path.toLowerCase(), path);
-    const title = (path.split("/").pop() ?? path).toLowerCase();
-    byTitleLower.set(title, [...(byTitleLower.get(title) ?? []), path]);
+  for (const node of nodes) {
+    byPathLower.set(node.id.toLowerCase(), node.id);
+    const title = (node.id.split("/").pop() ?? node.id).toLowerCase();
+    byTitleLower.set(title, [...(byTitleLower.get(title) ?? []), node.id]);
   }
 
   function resolveTarget(target: string): string | undefined {
@@ -47,16 +49,12 @@ export async function buildStructuralIndex(vaultPath: string): Promise<Structura
     adjacency.get(b)!.add(a);
   }
 
-  await Promise.all(
-    paths.map(async (path) => {
-      const note = await readNote(vaultPath, path);
-      if (!note) return;
-      for (const link of extractWikilinks(note.body)) {
-        const resolved = resolveTarget(link.target);
-        if (resolved) addEdge(path, resolved);
-      }
-    }),
-  );
+  for (const node of nodes) {
+    for (const target of adapter.extractExplicitLinkTargets(node)) {
+      const resolved = resolveTarget(target);
+      if (resolved) addEdge(node.id, resolved);
+    }
+  }
 
   const edges: Record<string, string[]> = {};
   for (const [path, neighbors] of adjacency) {

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "../src/structuralLinks.js";
+import type { SourceAdapter, SourceNode } from "../src/adapters.js";
 
 describe("buildStructuralIndex", () => {
   let vaultPath: string;
@@ -90,3 +91,46 @@ async function mkdtempSubdir(vaultPath: string, name: string): Promise<void> {
   const { mkdir } = await import("node:fs/promises");
   await mkdir(join(vaultPath, name), { recursive: true });
 }
+
+describe("buildStructuralIndex with a non-Obsidian SourceAdapter (AIBRAIN-33)", () => {
+  it("builds edges from a synthetic adapter with no filesystem involved", async () => {
+    const nodes: SourceNode[] = [
+      { id: "page-1", body: "references page-2" },
+      { id: "page-2", body: "no outgoing references" },
+    ];
+    const adapter: SourceAdapter = {
+      async listNodes() {
+        return nodes;
+      },
+      extractExplicitLinkTargets(node) {
+        // Stand-in for a Confluence/Azure-Wiki-style explicit reference
+        // syntax, distinct from Obsidian's [[wikilinks]] — proves the
+        // structural-index builder has no wikilink-specific assumptions.
+        return node.body.includes("references page-2") ? ["page-2"] : [];
+      },
+    };
+
+    // vaultPath is unused when a custom adapter is supplied — a dummy
+    // value confirms buildStructuralIndex doesn't fall back to reading
+    // the filesystem itself once an adapter is given.
+    const index = await buildStructuralIndex("/nonexistent/dummy/path", adapter);
+
+    expect(index.edges["page-1"]).toEqual(["page-2"]);
+    expect(index.edges["page-2"]).toEqual(["page-1"]);
+  });
+
+  it("drops an unresolvable link target instead of guessing", async () => {
+    const nodes: SourceNode[] = [{ id: "page-1", body: "" }];
+    const adapter: SourceAdapter = {
+      async listNodes() {
+        return nodes;
+      },
+      extractExplicitLinkTargets() {
+        return ["page-does-not-exist"];
+      },
+    };
+
+    const index = await buildStructuralIndex("/nonexistent/dummy/path", adapter);
+    expect(index.edges["page-1"] ?? []).toEqual([]);
+  });
+});
