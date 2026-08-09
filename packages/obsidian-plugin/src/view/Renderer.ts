@@ -14,6 +14,9 @@ const DEFAULT_EDGE_MAX_AGE_DAYS = 30;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 5;
 const ZOOM_STEP = 1.2;
+// Full cycle of the weighted-link ambient glow breathe, in ms — slow and
+// calm, meant to read as "alive," not distracting.
+const GLOW_BREATHE_PERIOD_MS = 2400;
 
 export type ColorScheme = "default" | "high-contrast";
 
@@ -26,28 +29,27 @@ function edgeKey(a: string, b: string): string {
   return [a, b].sort().join("|");
 }
 
+/** Cheap non-cryptographic string hash — only used to derive a stable per-edge animation phase, not for anything sensitive. */
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
 function resolvedNode(end: string | SimNode): SimNode | null {
   return typeof end === "string" ? null : end;
 }
 
-// Weight gradients: cold (weak links) -> hot (strong links).
-const WEIGHT_GRADIENTS: Record<ColorScheme, readonly [number, number, number][]> = {
-  default: [
-    [64, 140, 255], // blue
-    [70, 200, 140], // green
-    [235, 220, 60], // yellow
-    [235, 110, 170], // pink
-    [230, 60, 60], // red
-  ],
-  // wider perceptual spacing between stops for readers who struggle to
-  // distinguish the default palette's green/yellow/pink midtones
-  "high-contrast": [
-    [0, 120, 255], // blue
-    [0, 220, 220], // cyan
-    [255, 230, 0], // yellow
-    [255, 140, 0], // orange
-    [255, 0, 90], // magenta
-  ],
+// Weighted links render as a plain white glow (see drawWeightedEdge below)
+// rather than a hue gradient, so "color scheme" now controls glow contrast
+// instead of hue: high-contrast keeps weak links more visible and pushes
+// strong links brighter, for readers who found the old hue palette's
+// midtones hard to distinguish.
+const GLOW_SCHEME_CONFIG: Record<ColorScheme, { minAlpha: number; glowBoost: number }> = {
+  default: { minAlpha: 0.06, glowBoost: 1 },
+  "high-contrast": { minAlpha: 0.18, glowBoost: 1.3 },
 };
 
 // Fallback only for a cluster index ForceSim hasn't assigned a hue to yet
@@ -69,30 +71,25 @@ const SPARK_SEGMENTS = 5;
 const SPARK_AMPLITUDE = 4;
 
 /**
- * Draws a struck edge: the whole (x1,y1)-(x2,y2) span lights up instantly,
- * thin and bright yellow — current has already reached the far end, no
- * travel animation — and holds/fades with the caller's `fade`. The path
- * itself is a subtle, fixed zigzag (seeded from `seed`, computed once per
- * pulse and reused every frame) rather than a perfectly straight line, for
- * a spark/electric-current read without the jitter of re-randomizing each
- * frame.
+ * Builds a subtle, fixed zigzag path from (x1,y1) to (x2,y2) — seeded so
+ * the shape stays constant across frames for a given seed, rather than
+ * re-rolling every frame (that's what made an earlier attempt read as
+ * wobbling rather than a spark). Both endpoints land exactly on the nodes
+ * the edge connects; only the middle jags.
  */
-function drawStruckEdge(
-  ctx: CanvasRenderingContext2D,
+function buildSparkPath(
   x1: number,
   y1: number,
   x2: number,
   y2: number,
-  fade: number,
-  scale: number,
   seed: number,
-): void {
+  amplitude: number,
+): [number, number][] {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const len = Math.hypot(dx, dy) || 1;
   const nx = -dy / len;
   const ny = dx / len;
-  const amplitude = SPARK_AMPLITUDE / scale;
 
   const points: [number, number][] = [[x1, y1]];
   for (let i = 1; i < SPARK_SEGMENTS; i++) {
@@ -106,7 +103,32 @@ function drawStruckEdge(
     points.push([px + nx * jitter, py + ny * jitter]);
   }
   points.push([x2, y2]);
+  return points;
+}
 
+function strokeSparkPath(ctx: CanvasRenderingContext2D, points: readonly [number, number][]): void {
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
+  ctx.stroke();
+}
+
+/**
+ * Draws a struck edge: the whole (x1,y1)-(x2,y2) span lights up instantly,
+ * thin and bright yellow — current has already reached the far end, no
+ * travel animation — and holds/fades with the caller's `fade`.
+ */
+function drawStruckEdge(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  fade: number,
+  scale: number,
+  seed: number,
+): void {
+  const points = buildSparkPath(x1, y1, x2, y2, seed, SPARK_AMPLITUDE / scale);
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -114,22 +136,8 @@ function drawStruckEdge(
   ctx.shadowColor = `rgba(255, 200, 60, ${fade})`;
   ctx.strokeStyle = `rgba(255, 225, 110, ${fade})`;
   ctx.lineWidth = 1.3 / scale;
-  ctx.beginPath();
-  ctx.moveTo(points[0][0], points[0][1]);
-  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
-  ctx.stroke();
+  strokeSparkPath(ctx, points);
   ctx.restore();
-}
-
-function weightColor(t: number, gradient: readonly [number, number, number][]): [number, number, number] {
-  const clamped = Math.max(0, Math.min(1, t));
-  const segments = gradient.length - 1;
-  const scaled = clamped * segments;
-  const idx = Math.min(segments - 1, Math.floor(scaled));
-  const localT = scaled - idx;
-  const [r1, g1, b1] = gradient[idx];
-  const [r2, g2, b2] = gradient[idx + 1];
-  return [Math.round(r1 + (r2 - r1) * localT), Math.round(g1 + (g2 - g1) * localT), Math.round(b1 + (b2 - b1) * localT)];
 }
 
 /**
@@ -152,7 +160,7 @@ export class Renderer {
   private scale = 1;
   private panX = 0;
   private panY = 0;
-  private gradient = WEIGHT_GRADIENTS.default;
+  private glowScheme = GLOW_SCHEME_CONFIG.default;
   private edgeMaxAgeDays = DEFAULT_EDGE_MAX_AGE_DAYS;
   private primedNotes: ReadonlySet<string> = new Set();
 
@@ -194,7 +202,7 @@ export class Renderer {
   }
 
   setColorScheme(scheme: ColorScheme): void {
-    this.gradient = WEIGHT_GRADIENTS[scheme];
+    this.glowScheme = GLOW_SCHEME_CONFIG[scheme];
   }
 
   setEdgeMaxAgeDays(days: number): void {
@@ -313,12 +321,11 @@ export class Renderer {
       const touchesHoveredNode = hoveredId !== undefined && (source.id === hoveredId || target.id === hoveredId);
       const dimmed = hoveredId !== undefined && !touchesHoveredNode;
 
-      ctx.beginPath();
-      ctx.moveTo(source.x, source.y);
-      ctx.lineTo(target.x, target.y);
-
       if (edge.kind === "native") {
         const highlighted = isHovered || touchesHoveredNode;
+        ctx.beginPath();
+        ctx.moveTo(source.x, source.y);
+        ctx.lineTo(target.x, target.y);
         ctx.lineWidth = (highlighted ? 1.2 : 0.5) / this.scale;
         ctx.strokeStyle = highlighted
           ? "rgba(210, 210, 220, 0.6)"
@@ -335,28 +342,39 @@ export class Renderer {
       const pulse = this.pulses.find((p) => p.key === edgeKey(source.id, target.id));
       const pulseBoost = pulse ? 1 - (now - pulse.start) / PULSE_DURATION_MS : 0;
 
-      // color always reflects weight — hover only ever adjusts opacity/width, never the gradient hue
+      // Weighted links are a plain white glow whose intensity is driven by
+      // weight relative to the strongest edge in view — brighter, wider glow
+      // the more it's been used — plus a slow ambient breathe so strong
+      // links feel alive rather than static. Phase is keyed off the edge so
+      // edges don't all breathe in lockstep.
       const maxWeight = this.sim.getMaxWeight();
-      const [r, g, b] = weightColor(maxWeight > 0 ? edge.weight / maxWeight : 0, this.gradient);
+      const weightT = maxWeight > 0 ? Math.min(1, edge.weight / maxWeight) : 0;
+      const edgeSeed = hashString(edgeKey(source.id, target.id));
+      const phase = (edgeSeed % 1000) / 1000 * Math.PI * 2;
+      const breathe = 0.5 + 0.5 * Math.sin((now / GLOW_BREATHE_PERIOD_MS) * Math.PI * 2 + phase);
+      const glowStrength = Math.min(1, weightT * (0.75 + 0.25 * breathe) * this.glowScheme.glowBoost + pulseBoost);
 
-      const baseAlpha = Math.min(1, 0.06 + freshness * 0.35 + pulseBoost * 0.5);
+      const baseAlpha = Math.min(1, this.glowScheme.minAlpha + freshness * 0.35 + pulseBoost * 0.5);
       const alpha = touchesHoveredNode ? 1 : dimmed ? baseAlpha * 0.15 : baseAlpha;
 
-      // A just-reinforced edge glows white rather than just a brighter
-      // version of its resting gradient color, so "this link got stronger"
-      // reads as a distinct flash instead of blending into the color scale.
-      const glowT = pulseBoost;
-      const strokeR = Math.round(r + (255 - r) * glowT);
-      const strokeG = Math.round(g + (255 - g) * glowT);
-      const strokeB = Math.round(b + (255 - b) * glowT);
-
       ctx.lineWidth = (thickness + pulseBoost * 3 + (touchesHoveredNode ? 0.5 : 0)) / this.scale;
-      ctx.shadowBlur = glowT > 0 ? 14 * glowT : 0;
-      ctx.shadowColor = `rgba(255, 255, 255, ${glowT})`;
-      ctx.strokeStyle = isHovered
-        ? `rgba(255, 255, 255, ${Math.min(1, alpha + 0.3)})`
-        : `rgba(${strokeR}, ${strokeG}, ${strokeB}, ${alpha})`;
-      ctx.stroke();
+      ctx.shadowBlur = 4 + 16 * glowStrength;
+      ctx.shadowColor = `rgba(255, 255, 255, ${glowStrength})`;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${isHovered ? Math.min(1, alpha + 0.3) : alpha})`;
+
+      // Any weighted link (weight > 0) reads as a spark — a subtle, fixed
+      // zigzag rather than a plain straight line — with the jag more
+      // pronounced the stronger the edge, same seed-per-edge approach as
+      // the activation strike so it stays still, not flickering per frame.
+      if (edge.weight > 0) {
+        const amplitude = (SPARK_AMPLITUDE * (0.5 + 0.5 * weightT)) / this.scale;
+        strokeSparkPath(ctx, buildSparkPath(source.x, source.y, target.x, target.y, edgeSeed, amplitude));
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(source.x, source.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.stroke();
+      }
       ctx.shadowBlur = 0;
     }
 
