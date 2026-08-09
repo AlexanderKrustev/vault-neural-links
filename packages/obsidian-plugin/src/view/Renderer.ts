@@ -59,12 +59,23 @@ function clusterColor(hue: number, alpha: number): string {
   return `hsla(${hue}, 60%, 62%, ${alpha})`;
 }
 
+/** Deterministic given the same seed — used to jag a struck edge's path once per pulse, not re-rolled every frame (that's what made an earlier attempt read as wobbling rather than a spark). */
+function pseudoRandom(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const SPARK_SEGMENTS = 5;
+const SPARK_AMPLITUDE = 4;
+
 /**
  * Draws a struck edge: the whole (x1,y1)-(x2,y2) span lights up instantly,
  * thin and bright yellow — current has already reached the far end, no
- * travel animation — and holds/fades with the caller's `fade`. This is
- * "current hit this node and instantly spread down every branch," with the
- * lit path staying visible rather than a point sliding along the wire.
+ * travel animation — and holds/fades with the caller's `fade`. The path
+ * itself is a subtle, fixed zigzag (seeded from `seed`, computed once per
+ * pulse and reused every frame) rather than a perfectly straight line, for
+ * a spark/electric-current read without the jitter of re-randomizing each
+ * frame.
  */
 function drawStruckEdge(
   ctx: CanvasRenderingContext2D,
@@ -74,16 +85,38 @@ function drawStruckEdge(
   y2: number,
   fade: number,
   scale: number,
+  seed: number,
 ): void {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const amplitude = SPARK_AMPLITUDE / scale;
+
+  const points: [number, number][] = [[x1, y1]];
+  for (let i = 1; i < SPARK_SEGMENTS; i++) {
+    const t = i / SPARK_SEGMENTS;
+    const px = x1 + dx * t;
+    const py = y1 + dy * t;
+    // taper toward both endpoints so it still lands exactly on the nodes
+    // it connects, not drifting off to the side at the tips
+    const taper = Math.sin(Math.PI * t);
+    const jitter = (pseudoRandom(seed + i) - 0.5) * 2 * amplitude * taper;
+    points.push([px + nx * jitter, py + ny * jitter]);
+  }
+  points.push([x2, y2]);
+
   ctx.save();
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   ctx.shadowBlur = 10 * fade;
   ctx.shadowColor = `rgba(255, 200, 60, ${fade})`;
   ctx.strokeStyle = `rgba(255, 225, 110, ${fade})`;
   ctx.lineWidth = 1.3 / scale;
   ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
   ctx.stroke();
   ctx.restore();
 }
@@ -339,7 +372,7 @@ export class Renderer {
       const t = Math.min(1, (now - pulse.start) / DIRECTIONAL_PULSE_DURATION_MS);
       const fade =
         t < IMPULSE_HOLD_FRACTION ? 1 : Math.max(0, 1 - (t - IMPULSE_HOLD_FRACTION) / (1 - IMPULSE_HOLD_FRACTION));
-      drawStruckEdge(ctx, source.x, source.y, target.x, target.y, fade, this.scale);
+      drawStruckEdge(ctx, source.x, source.y, target.x, target.y, fade, this.scale, pulse.start);
     }
 
     for (const node of this.nodes) {
