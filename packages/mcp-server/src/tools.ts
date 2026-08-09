@@ -21,6 +21,13 @@ export interface ToolContext {
   vaultDataDir: string;
   client: VaultLinkClient;
   activationSocket?: ActivationSocketServer;
+  /**
+   * Path of the last note read via read_note in this session, used to
+   * auto-log traversal edges on the next read_note call. One MCP server
+   * process backs one session (see mcp-server/src/index.ts), so this is
+   * safe as plain mutable state rather than something keyed by client id.
+   */
+  lastReadNote?: string;
 }
 
 function textResult(value: unknown) {
@@ -241,10 +248,11 @@ export const logTraversalTool = {
     title: "Log traversal",
     description:
       "Records that this session moved from one vault note to another via a " +
-      "wikilink, for usage-weighted link ranking. Call this every time you read a " +
-      "second, different vault note that you reached by following a link from the " +
-      "note you were just looking at — this is what keeps get_weighted_neighbors " +
-      "useful over time. Skip it for the very first note read in a session (no 'from').",
+      "wikilink, for usage-weighted link ranking. read_note now logs this " +
+      "automatically between consecutive notes read in the same session, so you " +
+      "usually don't need to call this yourself — reach for it only when an edge " +
+      "should be credited without both notes having gone through read_note (e.g. " +
+      "content already known, or crediting a hop that skipped a read).",
     inputSchema: {
       from: z.string().describe("Vault-relative path of the previously read note"),
       to: z.string().describe("Vault-relative path of the note just read"),
@@ -406,6 +414,17 @@ export const readNoteTool = {
   },
   handler: (ctx: ToolContext) => async ({ path }: { path: string }) => {
     const note = await readNote(ctx.vaultPath, path);
+    if (note) {
+      // Auto-log traversal: this is what used to require the caller to
+      // separately invoke log_traversal after every second read. Doing it
+      // here means usage weights accrue just from normal MCP-mediated
+      // reading, with no separate call to remember.
+      const from = ctx.lastReadNote;
+      if (from && from !== path) {
+        await ctx.client.logTraversal(from, path, (event) => ctx.activationSocket?.broadcast(event));
+      }
+      ctx.lastReadNote = path;
+    }
     return textResult(note ?? { error: `No note found at ${path}` });
   },
 };
@@ -444,6 +463,10 @@ export const searchNotesTool = {
     (ctx: ToolContext) =>
     async ({ query, topK, useWeights }: { query: string; topK?: number; useWeights?: boolean }) => {
       const hits = await searchNotes(ctx.vaultPath, query, { topK, useWeights, vaultDataDir: ctx.vaultDataDir });
+      // Shallow-exposure priming only, same tier as get_weighted_neighbors —
+      // surfacing in a result list is not the deeper engagement read_note /
+      // log_traversal represent, so this must never persist as a weight.
+      if (hits.length > 0) await ctx.client.touch(...hits.map((h) => h.path));
       return textResult(hits);
     },
 };

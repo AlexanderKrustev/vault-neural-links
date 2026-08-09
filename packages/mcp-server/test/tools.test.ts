@@ -293,6 +293,30 @@ describe("mcp-server tools", () => {
     expect(readBack.body).toContain("## Updates\n- new entry\n- old entry\n");
   });
 
+  it("read_note auto-logs traversal between consecutive reads, skipping the first read and re-reads", async () => {
+    await createNoteTool.handler(ctx)({ path: "A", frontmatter: {}, body: "" });
+    await createNoteTool.handler(ctx)({ path: "B", frontmatter: {}, body: "" });
+
+    await readNoteTool.handler(ctx)({ path: "A" }); // first read: no 'from', nothing logged
+    await readNoteTool.handler(ctx)({ path: "B" }); // second, different note: logs A -> B
+    await readNoteTool.handler(ctx)({ path: "B" }); // re-reading the same note: no self-edge
+
+    const compactResult = await compactWeightsTool.handler(ctx)({});
+    expect(parseResult(compactResult).edgeCount).toBe(1);
+
+    const edge = parseResult(await getEdgeWeightTool.handler(ctx)({ noteA: "A", noteB: "B" }));
+    expect(edge.weight).toBeGreaterThan(0);
+  });
+
+  it("read_note does not log traversal for a note that doesn't exist", async () => {
+    await createNoteTool.handler(ctx)({ path: "A", frontmatter: {}, body: "" });
+
+    await readNoteTool.handler(ctx)({ path: "A" });
+    await readNoteTool.handler(ctx)({ path: "Missing" });
+    const compactResult = await compactWeightsTool.handler(ctx)({});
+    expect(parseResult(compactResult).edgeCount).toBe(0);
+  });
+
   it("list_notes lists created notes and skips Templates/", async () => {
     await createNoteTool.handler(ctx)({ path: "A", frontmatter: {}, body: "" });
     await createNoteTool.handler(ctx)({ path: "Templates/B", frontmatter: {}, body: "" });
@@ -306,6 +330,42 @@ describe("mcp-server tools", () => {
 
     const hits = parseResult(await searchNotesTool.handler(ctx)({ query: "Apple", useWeights: false }));
     expect(hits.map((h: { path: string }) => h.path)).toEqual(["Apple Device Tips"]);
+  });
+
+  it("search_notes primes its hits in the session without persisting any weight", async () => {
+    await createNoteTool.handler(ctx)({ path: "B", frontmatter: {}, body: "" });
+    await createNoteTool.handler(ctx)({ path: "C", frontmatter: {}, body: "" });
+
+    await appendEvent(ctx.vaultDataDir, "seed", {
+      ts: new Date().toISOString(),
+      instance: "seed",
+      type: "reinforce",
+      from: "A",
+      to: "B",
+      weight_delta: 5,
+    });
+    await appendEvent(ctx.vaultDataDir, "seed", {
+      ts: new Date().toISOString(),
+      instance: "seed",
+      type: "reinforce",
+      from: "A",
+      to: "C",
+      weight_delta: 5,
+    });
+    await compactWeightsTool.handler(ctx)({});
+
+    // Searching for "B" (an exact title match) should prime it for this
+    // session, same as get_weighted_neighbors would — but must not write
+    // any traverse/reinforce event of its own.
+    await searchNotesTool.handler(ctx)({ query: "B", useWeights: false });
+
+    const compactAfterSearch = await compactWeightsTool.handler(ctx)({});
+    expect(parseResult(compactAfterSearch).edgeCount).toBe(2); // unchanged from the 2 seeded edges — search added none
+
+    const neighbors = parseResult(await getWeightedNeighborsTool.handler(ctx)({ note: "A" }));
+    const b = neighbors.find((n: { path: string }) => n.path === "B");
+    const c = neighbors.find((n: { path: string }) => n.path === "C");
+    expect(b.weight).toBeGreaterThan(c.weight);
   });
 
   it("create_note skips auto-link/changelog for notes under Templates/", async () => {

@@ -45,6 +45,12 @@ const DEFAULT_REINFORCE_BOOST = 5;
 const DEFAULT_ACTIVATION_ENERGY = 10;
 
 export interface VaultLinkClient {
+  /**
+   * Session-only priming touch, no persisted weight change — for shallow
+   * exposure (e.g. a note surfacing in search results) that shouldn't be
+   * mistaken for the deeper engagement logTraversal/reinforce represent.
+   */
+  touch(...notes: string[]): Promise<void>;
   logTraversal(from: string, to: string, onEvent?: ActivationEventSink): Promise<void>;
   reinforce(from: string, to: string, boost?: number, onEvent?: ActivationEventSink): Promise<void>;
   getWeightedNeighbors(note: string, topK?: number): Promise<WeightedNeighbor[]>;
@@ -80,6 +86,8 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
   }
 
   return {
+    touch,
+
     async logTraversal(from: string, to: string, onEvent?: ActivationEventSink) {
       await touch(from, to);
       const ts = new Date().toISOString();

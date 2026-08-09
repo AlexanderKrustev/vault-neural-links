@@ -165,17 +165,21 @@ function computeClusterAdjacency(edges: readonly SimEdge[], clusterOf: Map<strin
 }
 
 const CLUSTER_FORCE_STRENGTH = 0.025;
-const CLUSTER_ANCHOR_SPACING = 55;
+const CLUSTER_ANCHOR_SPACING = 70;
 // Higher than CLUSTER_FORCE_STRENGTH: this force must be strong enough to
-// visibly out-compete forceManyBody's charge (-220) and forceCollide,
+// visibly out-compete forceManyBody's charge (-260) and forceCollide,
 // which otherwise keep every node evenly pushed apart regardless of
-// importance and wash out the intended center-to-rim gradient.
-const INTRA_CLUSTER_RADIAL_STRENGTH = 0.18;
+// importance and wash out the intended center-to-rim gradient. Scaled up
+// alongside the stronger charge below — raising charge without raising
+// this proportionally breaks the star shape entirely (nodes get pushed
+// out by the repulsion with nothing strong enough pulling them back into
+// their cluster's formation).
+const INTRA_CLUSTER_RADIAL_STRENGTH = 0.22;
 // Distance from its own cluster's anchor at which a zero-importance node
 // settles; a max-importance (1.0) node settles at the anchor itself. Keeps
 // each cluster's "star" contained well inside CLUSTER_ANCHOR_SPACING's
 // inter-cluster gap rather than bleeding into neighboring regions.
-const INTRA_CLUSTER_MAX_RADIUS = 90;
+const INTRA_CLUSTER_MAX_RADIUS = 110;
 
 /**
  * Nudges each connected node toward an anchor point shared by its detected
@@ -458,18 +462,24 @@ export class ForceSim {
       .force(
         "charge",
         forceManyBody<SimNode>()
-          .strength((d) => (degree.get(d.id) ?? 0) === 0 ? -30 : -220)
-          .distanceMax(400),
+          // wider mutual repulsion than before (-220) so connected nodes
+          // don't pack so tightly against the link/cluster forces pulling
+          // them together — see AIBRAIN case where the graph read as one
+          // dense knot instead of a legible layout. Kept moderate (not
+          // pushed further) because INTRA_CLUSTER_RADIAL_STRENGTH has to
+          // out-compete this to keep cluster "stars" coherent.
+          .strength((d) => (degree.get(d.id) ?? 0) === 0 ? -30 : -260)
+          .distanceMax(420),
       )
       .force(
         "link",
         forceLink<SimNode, SimEdge>(edges)
           .id((d) => d.id)
-          .distance(75)
-          .strength((d) => (d.kind === "native" ? 0.05 : 0.25)),
+          .distance(110)
+          .strength((d) => (d.kind === "native" ? 0.05 : 0.2)),
       )
       .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide((d) => nodeRadius(degree.get(d.id) ?? 0, this.importance.get(d.id) ?? 0) + 8))
+      .force("collide", forceCollide((d) => nodeRadius(degree.get(d.id) ?? 0, this.importance.get(d.id) ?? 0) + 14))
       // notes with no connections at all are kept at or beyond the reach of
       // the connected cluster, instead of drifting in among it
       .force("isolate", createIsolateRingForce(degree))

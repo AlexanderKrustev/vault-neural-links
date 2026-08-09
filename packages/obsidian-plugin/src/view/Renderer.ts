@@ -1,12 +1,15 @@
 import { nodeRadius, type ForceSim, type SimEdge, type SimNode } from "./ForceSim.js";
 
 const PULSE_DURATION_MS = 600;
-// Long enough to follow the moving point, short enough to finish before
-// Study mode's next hop (150-300ms gap) typically arrives.
-const DIRECTIONAL_PULSE_DURATION_MS = 900;
+// A struck edge lights up its whole length instantly — no travel time, the
+// current has already reached the far end — holds bright for
+// IMPULSE_HOLD_FRACTION of this duration so the path actually stays
+// visible, then fades out over the rest.
+const DIRECTIONAL_PULSE_DURATION_MS = 2600;
+const IMPULSE_HOLD_FRACTION = 0.35;
 // Deliberately outlives the directional pulse that feeds it, so "pulse
 // arrives, node glows, fades" reads as one hop.
-const ACTIVATION_RING_DURATION_MS = 1200;
+const ACTIVATION_RING_DURATION_MS = 2600;
 const DEFAULT_EDGE_MAX_AGE_DAYS = 30;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 5;
@@ -54,6 +57,35 @@ const CLUSTER_HUE_FALLBACK_STEP = 137.508;
 
 function clusterColor(hue: number, alpha: number): string {
   return `hsla(${hue}, 60%, 62%, ${alpha})`;
+}
+
+/**
+ * Draws a struck edge: the whole (x1,y1)-(x2,y2) span lights up instantly,
+ * thin and bright yellow — current has already reached the far end, no
+ * travel animation — and holds/fades with the caller's `fade`. This is
+ * "current hit this node and instantly spread down every branch," with the
+ * lit path staying visible rather than a point sliding along the wire.
+ */
+function drawStruckEdge(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  fade: number,
+  scale: number,
+): void {
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.shadowBlur = 10 * fade;
+  ctx.shadowColor = `rgba(255, 200, 60, ${fade})`;
+  ctx.strokeStyle = `rgba(255, 225, 110, ${fade})`;
+  ctx.lineWidth = 1.3 / scale;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function weightColor(t: number, gradient: readonly [number, number, number][]): [number, number, number] {
@@ -277,13 +309,27 @@ export class Renderer {
       const baseAlpha = Math.min(1, 0.06 + freshness * 0.35 + pulseBoost * 0.5);
       const alpha = touchesHoveredNode ? 1 : dimmed ? baseAlpha * 0.15 : baseAlpha;
 
+      // A just-reinforced edge glows white rather than just a brighter
+      // version of its resting gradient color, so "this link got stronger"
+      // reads as a distinct flash instead of blending into the color scale.
+      const glowT = pulseBoost;
+      const strokeR = Math.round(r + (255 - r) * glowT);
+      const strokeG = Math.round(g + (255 - g) * glowT);
+      const strokeB = Math.round(b + (255 - b) * glowT);
+
       ctx.lineWidth = (thickness + pulseBoost * 3 + (touchesHoveredNode ? 0.5 : 0)) / this.scale;
+      ctx.shadowBlur = glowT > 0 ? 14 * glowT : 0;
+      ctx.shadowColor = `rgba(255, 255, 255, ${glowT})`;
       ctx.strokeStyle = isHovered
         ? `rgba(255, 255, 255, ${Math.min(1, alpha + 0.3)})`
-        : `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        : `rgba(${strokeR}, ${strokeG}, ${strokeB}, ${alpha})`;
       ctx.stroke();
+      ctx.shadowBlur = 0;
     }
 
+    // Live activation: current hits the node and every branch it spread
+    // through lights up instantly (no travel time) and stays visible,
+    // thin and bright yellow, before fading out.
     for (const pulse of this.directionalPulses) {
       const source = this.nodes.find((n) => n.id === pulse.source);
       const target = this.nodes.find((n) => n.id === pulse.target);
@@ -291,14 +337,9 @@ export class Renderer {
       if (target.x === undefined || target.y === undefined) continue;
 
       const t = Math.min(1, (now - pulse.start) / DIRECTIONAL_PULSE_DURATION_MS);
-      const fade = 1 - t;
-      const px = source.x + (target.x - source.x) * t;
-      const py = source.y + (target.y - source.y) * t;
-
-      ctx.beginPath();
-      ctx.arc(px, py, 4 / this.scale, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 255, 255, ${fade})`;
-      ctx.fill();
+      const fade =
+        t < IMPULSE_HOLD_FRACTION ? 1 : Math.max(0, 1 - (t - IMPULSE_HOLD_FRACTION) / (1 - IMPULSE_HOLD_FRACTION));
+      drawStruckEdge(ctx, source.x, source.y, target.x, target.y, fade, this.scale);
     }
 
     for (const node of this.nodes) {
