@@ -59,15 +59,20 @@ Copy-Item manifest.json,main.js,styles.css $dest
 In Obsidian: **Settings → Community plugins** → turn off Restricted mode
 (if on) → enable **Vault Neural Links**.
 
-## 7. Optional: nightly compaction task
+## 7. Nightly pipeline — no setup needed
 
-A Windows Scheduled Task can run `packages/core/bin/vnl-compact.js
-<vaultPath>` daily to fold traversal events into `link-weights.json` with
-decay applied:
+The Obsidian plugin schedules the daily compact/consolidate/reindex/
+importance/cluster pipeline itself (see `NightlyScheduler` in
+`packages/obsidian-plugin/src`) — it checks periodically while Obsidian is
+open and runs at most once per day, gated on `note-importance.json`'s
+`computedAt` staleness marker so it's safe across restarts and doesn't
+double-run. No OS scheduled task and no Claude Code session are involved;
+the pipeline simply doesn't run on days the vault isn't opened in Obsidian.
 
-```powershell
-schtasks /create /tn "VaultNeuralLinksCompact" /tr "node C:\path\to\vault-neural-link\packages\core\bin\vnl-compact.js C:\path\to\your\vault" /sc daily /st 03:30
-```
+`packages/core/bin/vnl-compact.js <vaultPath>` and
+`packages/core/bin/vnl-nightly.js <vaultPath>` remain available as manual
+CLI fallbacks (e.g. headless/non-Obsidian setups) but are no longer part
+of the standard install.
 
 ## Not covered here
 

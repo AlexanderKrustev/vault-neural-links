@@ -17,14 +17,16 @@ export interface NightlyRunResult {
 
 /**
  * Runs the same pipeline as bin/vnl-nightly.js, but gated on staleness
- * instead of wall-clock cron — meant to be called (fire-and-forget) once
- * per MCP server process startup, since the server itself is respawned
- * per Claude Code session and travels with the repo, unlike a per-machine
- * Task Scheduler entry or ~/.claude hook. note-importance.json's
+ * instead of wall-clock cron. Called from the Obsidian plugin's
+ * NightlyScheduler (packages/obsidian-plugin/src/NightlyScheduler.ts) on
+ * startup and on a periodic check while Obsidian is open — the sole
+ * trigger for this pipeline as of AIBRAIN-46 (no OS scheduled task, no
+ * Claude Code / MCP-server-startup trigger). note-importance.json's
  * `computedAt` is the staleness marker because, unlike link-weights.json's
  * `compactedAt`, it's only ever written by this full pipeline — never by
  * the on-demand `compact_weights` tool — so frequent ad-hoc compaction
- * can't mask a stale nightly run.
+ * can't mask a stale run, and because it's a persisted file (not
+ * in-memory plugin state) the gate survives Obsidian restarts/crashes too.
  */
 export async function runNightlyIfStale(
   vaultPath: string,

@@ -11,6 +11,7 @@ interface ActivationSocketRegistration {
 type NodeFs = {
   readdir(path: string, cb: (err: unknown, files: string[]) => void): void;
   readFile(path: string, encoding: "utf-8", cb: (err: unknown, data: string) => void): void;
+  unlink(path: string, cb: (err: unknown) => void): void;
 };
 
 function loadFs(): NodeFs | null {
@@ -36,6 +37,12 @@ function loadFs(): NodeFs | null {
 export class ActivationSocketWatcher {
   private pollHandle: ReturnType<typeof setInterval> | null = null;
   private sockets = new Map<string, WebSocket>();
+  // instanceIds that failed to connect at least once — every MCP server
+  // process gets a fresh instanceId (see packages/mcp-server/src/index.ts),
+  // so a dead port here is dead forever; without this set, a stale
+  // registration file whose deletion races or fails would otherwise be
+  // retried on every single poll tick indefinitely.
+  private deadInstanceIds = new Set<string>();
   private onEvent: ((event: ActivationTraceEvent) => void) | null = null;
 
   constructor(private readonly socketsDir: string) {}
@@ -53,6 +60,7 @@ export class ActivationSocketWatcher {
     }
     for (const socket of this.sockets.values()) socket.close();
     this.sockets.clear();
+    this.deadInstanceIds.clear();
     this.onEvent = null;
   }
 
@@ -67,10 +75,11 @@ export class ActivationSocketWatcher {
     for (const file of files) {
       if (!file.endsWith(".json")) continue;
       const instanceId = file.slice(0, -".json".length);
-      if (this.sockets.has(instanceId)) continue;
+      if (this.sockets.has(instanceId) || this.deadInstanceIds.has(instanceId)) continue;
 
+      const registrationPath = `${this.socketsDir}/${file}`;
       const raw = await new Promise<string | null>((resolve) => {
-        fs.readFile(`${this.socketsDir}/${file}`, "utf-8", (err, data) => resolve(err ? null : data));
+        fs.readFile(registrationPath, "utf-8", (err, data) => resolve(err ? null : data));
       });
       if (!raw) continue;
 
@@ -81,11 +90,11 @@ export class ActivationSocketWatcher {
         continue;
       }
 
-      this.connect(instanceId, registration.port);
+      this.connect(instanceId, registration.port, registrationPath);
     }
   }
 
-  private connect(instanceId: string, port: number): void {
+  private connect(instanceId: string, port: number, registrationPath: string): void {
     const socket = new WebSocket(`ws://127.0.0.1:${port}`);
     this.sockets.set(instanceId, socket);
 
@@ -98,10 +107,21 @@ export class ActivationSocketWatcher {
       }
     });
 
-    const evict = () => {
+    // Fires on a clean server-side close (session ended normally) as well
+    // as a failed/refused connection (stale registration file left behind
+    // by a session that didn't shut down cleanly) — either way this
+    // instanceId's port is never coming back, so mark it dead and clean up
+    // the file rather than letting `reload()` retry it every poll tick.
+    const giveUp = () => {
       if (this.sockets.get(instanceId) === socket) this.sockets.delete(instanceId);
+      this.deadInstanceIds.add(instanceId);
+      const fs = loadFs();
+      fs?.unlink(registrationPath, () => {
+        // best-effort — if this races with another cleanup or the file's
+        // already gone, there's nothing further to do
+      });
     };
-    socket.addEventListener("close", evict);
-    socket.addEventListener("error", evict);
+    socket.addEventListener("close", giveUp);
+    socket.addEventListener("error", giveUp);
   }
 }

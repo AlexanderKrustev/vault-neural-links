@@ -1,3 +1,4 @@
+
 # CLAUDE.md integration
 
 Once `packages/core` has a working implementation, a session wires in

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { runNightlyIfStale } from "@vault-neural-links/core";
 import { startActivationSocketServer } from "./activationSocket.js";
 import {
   ablationDiffTool,
@@ -32,15 +31,10 @@ const instanceId = `mcp-${randomUUID()}`;
 const ctx = makeToolContext(vaultPath, instanceId);
 ctx.activationSocket = await startActivationSocketServer(ctx.vaultDataDir, instanceId);
 
-// Fire-and-forget: the server process itself is respawned per Claude Code
-// session, so this is the portable stand-in for a per-machine nightly
-// Task Scheduler entry (which doesn't survive moving to another PC and
-// doesn't run at all while this PC is off). Never awaited — tool
-// registration below must not block on it. Must log to stderr, not
-// stdout, since stdout is the stdio JSON-RPC transport.
-runNightlyIfStale(vaultPath, ctx.vaultDataDir).catch((err) => {
-  console.error("vault-neural-link: background nightly run failed:", err);
-});
+// The nightly compact/consolidate/reindex/importance/cluster pipeline is no
+// longer triggered from here — Obsidian is now the sole scheduler (see
+// packages/obsidian-plugin/src/NightlyScheduler.ts, AIBRAIN-46). This
+// process still exposes compact_weights for on-demand ad-hoc compaction.
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, async () => {
