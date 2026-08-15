@@ -1,0 +1,261 @@
+<!doctype html>
+<title>Vault Neural Links — Architecture</title>
+<style>
+  :root {
+    --paper: #f6f5f2;
+    --ink: #1c2024;
+    --line: #d8d5cf;
+    --panel: #ffffff;
+    --current: #1565c0;
+    --current-fill: #dae8fc;
+    --planned: #b5560c;
+    --planned-fill: #ffe6c4;
+    --cloud: #5a5f66;
+    --cloud-fill: #e8e8ee;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", "Inter", system-ui, sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --paper: #14161a;
+    --ink: #e8e6e1;
+    --line: #33373d;
+    --panel: #1b1e23;
+    --current: #6ea8f0;
+    --current-fill: #1c2c42;
+    --planned: #e8a15c;
+    --planned-fill: #3a2c18;
+    --cloud: #a3a8b0;
+    --cloud-fill: #2a2c31;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #14161a;
+      --ink: #e8e6e1;
+      --line: #33373d;
+      --panel: #1b1e23;
+      --current: #6ea8f0;
+      --current-fill: #1c2c42;
+      --planned: #e8a15c;
+      --planned-fill: #3a2c18;
+      --cloud: #a3a8b0;
+      --cloud-fill: #2a2c31;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    padding: 40px 24px 80px;
+  }
+  header {
+    max-width: 980px;
+    margin: 0 auto 28px;
+  }
+  h1 {
+    font-size: 1.65rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .subtitle {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: color-mix(in srgb, var(--ink) 60%, transparent);
+    margin: 0;
+  }
+  .legend {
+    max-width: 980px;
+    margin: 22px auto 0;
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+    padding: 12px 16px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .legend span.swatch {
+    display: inline-block;
+    width: 14px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 7px;
+    vertical-align: middle;
+  }
+  .legend-item { display: flex; align-items: center; }
+  .swatch.current { background: var(--current-fill); border: 1.5px solid var(--current); }
+  .swatch.planned { background: var(--planned-fill); border: 1.5px dashed var(--planned); }
+  .swatch.cloud { background: var(--cloud-fill); border: 1.5px dashed var(--cloud); }
+
+  .diagram-wrap {
+    max-width: 1180px;
+    margin: 28px auto 0;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 24px;
+    overflow-x: auto;
+  }
+
+  .file-note {
+    max-width: 980px;
+    margin: 20px auto 0;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: color-mix(in srgb, var(--ink) 75%, transparent);
+  }
+  .file-note code {
+    font-family: var(--mono);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.82em;
+  }
+
+  pre.mermaid { background: transparent; }
+</style>
+
+<header>
+  <h1>Vault Neural Links — System Architecture</h1>
+  <p class="subtitle">current state + roadmap · AIBRAIN (Jira) · packages/core, mcp-server, obsidian-plugin</p>
+</header>
+
+<div class="legend">
+  <div class="legend-item"><span class="swatch current"></span>Current — shipped</div>
+  <div class="legend-item"><span class="swatch planned"></span>Planned — Jira To Do</div>
+  <div class="legend-item"><span class="swatch cloud"></span>Phase 4 — conditional (cloud, gated on Phase 3 data)</div>
+</div>
+
+<div class="diagram-wrap">
+<pre class="mermaid">
+flowchart TB
+  classDef current fill:#DAE8FC,stroke:#1565C0,stroke-width:1.5px,color:#0d2b52,font-size:12px;
+  classDef planned fill:#FFE6C4,stroke:#B5560C,stroke-width:1.5px,stroke-dasharray:4 3,color:#5c2c05,font-size:12px;
+  classDef cloud fill:#E8E8EE,stroke:#5A5F66,stroke-width:1.5px,stroke-dasharray:4 3,color:#2e3136,font-size:12px;
+
+  subgraph S1["① External Sources"]
+    direction LR
+    ObsVault["Obsidian Vault<br/>(wikilinks, markdown)"]:::current
+    Confluence["Confluence"]:::planned
+    AzureWiki["Azure Wiki"]:::planned
+    WordDocs["Word Docs (.docx)"]:::planned
+  end
+
+  subgraph S2["② Source Adapters — packages/core/adapters.ts"]
+    direction TB
+    Iface["SourceAdapter interface<br/>parse(source) → {nodes, edges}<br/>AIBRAIN-33, shipped"]:::current
+    subgraph S2a[" "]
+      direction LR
+      ObsAdapter["ObsidianAdapter<br/>(reference impl)"]:::current
+      ConfAdapter["ConfluenceAdapter"]:::planned
+      AzureAdapter["AzureWikiAdapter"]:::planned
+      WordAdapter["WordDocAdapter"]:::planned
+    end
+    AIEdge["AI-Inferred Edge Pipeline — AIBRAIN-34<br/>1. co-occurrence candidates<br/>2. LLM judges 'does A reference B?'<br/>3. confidence-weighted, earns weight via consolidation"]:::planned
+  end
+
+  subgraph S3["③ Core Engine — packages/core (source-agnostic)"]
+    direction LR
+    Parser["Parser<br/>(wikilink extraction)"]:::current
+    EventLog["Event Logger<br/>(append-only JSONL)"]:::current
+    Decay["Decay Engine<br/>(30d half-life)"]:::current
+    Compactor["Compactor<br/>(fold logs → weights)"]:::current
+    Query["Query Engine<br/>getWeightedNeighbors"]:::current
+    Spread["Spreading Activation<br/>(multi-hop, tiered fallback)"]:::current
+    PageRank["PageRank / Importance"]:::current
+    Louvain["Louvain Clustering"]:::current
+    Ablation["Ablation Harness"]:::current
+    NotesCRUD["Notes CRUD + AutoLink<br/>+ Changelog + GitSync"]:::current
+    CloudEngine["Reinforcement Engine + Context Assembly<br/>server-side, Phase 4 — AIBRAIN-62"]:::cloud
+  end
+
+  subgraph S4["④ Persistent Storage — &lt;vault&gt;/.vault-neural-links/"]
+    direction LR
+    LW[("link-weights.json")]:::current
+    EV[("events/*.jsonl")]:::current
+    NI[("note-importance.json")]:::current
+    CL[("changes.jsonl")]:::current
+    GH[("git commit history")]:::current
+  end
+
+  Nightly["NightlyScheduler (Obsidian plugin, self-scheduled)<br/>staleness-gated · AIBRAIN-46<br/>compact → consolidate → reindex → importance → cluster"]:::current
+
+  subgraph S5["⑤ MCP Server — packages/mcp-server"]
+    direction LR
+    ToolsQ["get_weighted_neighbors · get_edge_weight<br/>activate · log_traversal · reinforce_link"]:::current
+    ToolsA["ablation_diff · compact_weights"]:::current
+    ToolsN["create_note · update_note · read_note<br/>list_notes · search_notes"]:::current
+    CloudMCP["Cloud MCP Backend<br/>multi-tenant, hosted — Phase 4, AIBRAIN-62"]:::cloud
+  end
+
+  subgraph S6["⑥ Clients"]
+    direction LR
+    ClaudeCode["Claude Code<br/>(MCP client, daily driver)"]:::current
+    ClaudeDesktop["Claude Desktop<br/>(MCP client)"]:::planned
+    ObsPlugin["Obsidian Plugin — NeuralGraphView<br/>Renderer.ts + ForceSim.ts<br/>radial-star layout, spark-glow edges"]:::current
+    StandaloneUI["Standalone Web UI<br/>decoupled from Obsidian — Phase 4, AIBRAIN-63"]:::cloud
+    MdImport["Markdown/Vault Import<br/>Onboarding — AIBRAIN-64"]:::cloud
+  end
+
+  subgraph S7["⑦ Growth &amp; Monetization — Phase 3 / 4"]
+    direction LR
+    Analytics["Usage/Install Analytics<br/>AIBRAIN-60"]:::planned
+    PaidTier["Paid Tier Gating<br/>€3–4/mo — AIBRAIN-59"]:::planned
+    Gate["Decision Gate: Go/No-Go<br/>AIBRAIN-61"]:::planned
+    Reprice["Repricing by Usage<br/>AIBRAIN-65"]:::cloud
+    Launch["Plugin Directory + Public Launch<br/>AIBRAIN-57 / 58"]:::planned
+  end
+
+  ObsVault --> ObsAdapter
+  Confluence -.-> ConfAdapter
+  AzureWiki -.-> AzureAdapter
+  WordDocs -.-> WordAdapter
+  ConfAdapter -.-> AIEdge
+  AzureAdapter -.-> AIEdge
+  WordAdapter -.-> AIEdge
+  ObsAdapter --> Iface
+  AIEdge -.-> Iface
+  Iface --> Parser
+  Parser --> EventLog --> Compactor
+  Decay --> Compactor
+  Compactor --> LW
+  LW --> Query --> Spread
+  LW --> PageRank --> NI
+  LW --> Louvain --> NI
+  NotesCRUD --> CL
+  NotesCRUD --> GH
+  Nightly -.-> Compactor
+  Nightly -.-> PageRank
+  Nightly -.-> Louvain
+  Query --> ToolsQ
+  Spread --> ToolsQ
+  Ablation --> ToolsA
+  Compactor --> ToolsA
+  NotesCRUD --> ToolsN
+  CloudEngine -.-> CloudMCP
+  ClaudeCode --> ToolsQ
+  ClaudeCode --> ToolsN
+  ClaudeDesktop -.-> ToolsQ
+  ObsPlugin --> ToolsQ
+  ObsPlugin --> Nightly
+  StandaloneUI -.-> CloudMCP
+  MdImport -.-> StandaloneUI
+  PaidTier -.-> CloudMCP
+  PaidTier -.-> StandaloneUI
+  Analytics -.-> Gate
+  Gate -.-> CloudEngine
+  Gate -.-> Reprice
+  Launch -.-> Analytics
+</pre>
+</div>
+
+<p class="file-note">
+  Editable source for this diagram (draw.io / diagrams.net format):
+  <code>docs/architecture-diagram.drawio</code> in the repo. Open it at
+  <code>app.diagrams.net</code> → File → Open From → Device.
+</p>

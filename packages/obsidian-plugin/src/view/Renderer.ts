@@ -48,8 +48,8 @@ function resolvedNode(end: string | SimNode): SimNode | null {
 // strong links brighter, for readers who found the old hue palette's
 // midtones hard to distinguish.
 const GLOW_SCHEME_CONFIG: Record<ColorScheme, { minAlpha: number; glowBoost: number }> = {
-  default: { minAlpha: 0.06, glowBoost: 1 },
-  "high-contrast": { minAlpha: 0.18, glowBoost: 1.3 },
+  default: { minAlpha: 0.1, glowBoost: 1 },
+  "high-contrast": { minAlpha: 0.24, glowBoost: 1.3 },
 };
 
 // Fallback only for a cluster index ForceSim hasn't assigned a hue to yet
@@ -160,6 +160,12 @@ export class Renderer {
   private scale = 1;
   private panX = 0;
   private panY = 0;
+  // Backing-store pixels per CSS pixel. Edge line widths/blur are specified
+  // in backing pixels post-zoom-transform, so on a higher-density display
+  // (e.g. a laptop panel at 1.5x/2x vs. a 1x external monitor) the exact
+  // same constant reads visibly thinner in real-world terms. Multiplying by
+  // this keeps edges a consistent physical size across displays.
+  private pixelRatio = 1;
   private glowScheme = GLOW_SCHEME_CONFIG.default;
   private edgeMaxAgeDays = DEFAULT_EDGE_MAX_AGE_DAYS;
   private primedNotes: ReadonlySet<string> = new Set();
@@ -285,6 +291,7 @@ export class Renderer {
 
   private resizeToDisplaySize(): void {
     const ratio = window.devicePixelRatio || 1;
+    this.pixelRatio = ratio;
     const width = Math.round(this.canvas.clientWidth * ratio);
     const height = Math.round(this.canvas.clientHeight * ratio);
     if (this.canvas.width !== width || this.canvas.height !== height) {
@@ -326,19 +333,19 @@ export class Renderer {
         ctx.beginPath();
         ctx.moveTo(source.x, source.y);
         ctx.lineTo(target.x, target.y);
-        ctx.lineWidth = (highlighted ? 1.2 : 0.5) / this.scale;
+        ctx.lineWidth = ((highlighted ? 1.4 : 0.7) * this.pixelRatio) / this.scale;
         ctx.strokeStyle = highlighted
-          ? "rgba(210, 210, 220, 0.6)"
+          ? "rgba(220, 220, 230, 0.75)"
           : dimmed
-            ? "rgba(140, 140, 150, 0.04)"
-            : "rgba(140, 140, 150, 0.1)";
+            ? "rgba(150, 150, 160, 0.06)"
+            : "rgba(150, 150, 160, 0.16)";
         ctx.stroke();
         continue;
       }
 
       const ageDays = (Date.now() - Date.parse(edge.lastTouched)) / 86_400_000;
       const freshness = Math.max(0, 1 - ageDays / this.edgeMaxAgeDays);
-      const thickness = Math.max(0.4, Math.log2(edge.weight + 1) * 0.6);
+      const thickness = Math.max(0.7, Math.log2(edge.weight + 1) * 0.9);
       const pulse = this.pulses.find((p) => p.key === edgeKey(source.id, target.id));
       const pulseBoost = pulse ? 1 - (now - pulse.start) / PULSE_DURATION_MS : 0;
 
@@ -357,8 +364,9 @@ export class Renderer {
       const baseAlpha = Math.min(1, this.glowScheme.minAlpha + freshness * 0.35 + pulseBoost * 0.5);
       const alpha = touchesHoveredNode ? 1 : dimmed ? baseAlpha * 0.15 : baseAlpha;
 
-      ctx.lineWidth = (thickness + pulseBoost * 3 + (touchesHoveredNode ? 0.5 : 0)) / this.scale;
-      ctx.shadowBlur = 4 + 16 * glowStrength;
+      ctx.lineWidth =
+        ((thickness + pulseBoost * 3 + (touchesHoveredNode ? 0.5 : 0)) * this.pixelRatio) / this.scale;
+      ctx.shadowBlur = (4 + 16 * glowStrength) * this.pixelRatio;
       ctx.shadowColor = `rgba(255, 255, 255, ${glowStrength})`;
       ctx.strokeStyle = `rgba(255, 255, 255, ${isHovered ? Math.min(1, alpha + 0.3) : alpha})`;
 
@@ -485,7 +493,13 @@ export class Renderer {
 
   private hitTestEdge(worldX: number, worldY: number): SimEdge | null {
     const threshold = 5;
-    for (const edge of this.sim.getEdges()) {
+    // Iterate in reverse draw order (native edges are drawn first, neural/weighted
+    // edges drawn on top — see ForceSim's [...nativeSimEdges, ...neuralEdges]) so an
+    // overlapping pair resolves to whichever edge is actually visible on top, not
+    // whichever happens to be first in the array.
+    const edges = this.sim.getEdges();
+    for (let i = edges.length - 1; i >= 0; i--) {
+      const edge = edges[i];
       const source = resolvedNode(edge.source);
       const target = resolvedNode(edge.target);
       if (!source || !target) continue;
