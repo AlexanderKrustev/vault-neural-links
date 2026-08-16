@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   appendChangelogEntry,
   appendUnderHeading,
+  AUTO_REINFORCE_BOOST,
   autoLinkScan,
   DEFAULT_SPREADING_ACTIVATION_CONFIG,
   getEdgeWeight,
@@ -28,6 +29,17 @@ export interface ToolContext {
    * safe as plain mutable state rather than something keyed by client id.
    */
   lastReadNote?: string;
+  /**
+   * Notes that surfaced in this session's most recent activate() /
+   * get_weighted_neighbors() result, mapped to the note that was queried to
+   * retrieve them (AIBRAIN-71). If one of these is then actually opened via
+   * read_note, that's a deterministic "this retrieval result got acted on"
+   * signal, so it's auto-reinforced — no LLM has to notice and decide to
+   * call reinforce_link. Overwritten wholesale on each new retrieval call
+   * (last retrieval wins) and consumed (deleted) on credit, same
+   * process-lifetime-only scope as lastReadNote.
+   */
+  pendingRetrievals: Map<string, string>;
 }
 
 function textResult(value: unknown) {
@@ -50,6 +62,7 @@ export const getWeightedNeighborsTool = {
   },
   handler: (ctx: ToolContext) => async ({ note, topK }: { note: string; topK?: number }) => {
     const neighbors = await ctx.client.getWeightedNeighbors(note, topK);
+    ctx.pendingRetrievals = new Map(neighbors.map((n) => [n.path, note]));
     return textResult(neighbors);
   },
 };
@@ -140,6 +153,7 @@ export const activateTool = {
         },
         { minK, budgetMs },
       );
+      ctx.pendingRetrievals = new Map(result.notes.map((n) => [n.path, note]));
       return textResult({
         activated: result.notes,
         tier: result.tier,
@@ -247,19 +261,19 @@ export const logTraversalTool = {
   config: {
     title: "Log traversal",
     description:
-      "Records that this session moved from one vault note to another via a " +
-      "wikilink, for usage-weighted link ranking. read_note now logs this " +
-      "automatically between consecutive notes read in the same session, so you " +
-      "usually don't need to call this yourself — reach for it only when an edge " +
-      "should be credited without both notes having gone through read_note (e.g. " +
-      "content already known, or crediting a hop that skipped a read).",
+      "Records that this session moved from one vault note to another via a wikilink, for usage-weighted " +
+      "link ranking. read_note already logs this automatically between consecutive notes read in the same " +
+      "session (AIBRAIN-68/71 analysis found this manual path was rarely if ever the thing actually credit " +
+      "edges in practice) — reach for this tool only for the narrow remaining case a read_note pair can't " +
+      "cover: crediting an edge whose target note's content was already known and so was never re-read. " +
+      "This is a deliberate manual override, not a routine step to remember after every hop.",
     inputSchema: {
       from: z.string().describe("Vault-relative path of the previously read note"),
       to: z.string().describe("Vault-relative path of the note just read"),
     },
   },
   handler: (ctx: ToolContext) => async ({ from, to }: { from: string; to: string }) => {
-    await ctx.client.logTraversal(from, to, (event) => ctx.activationSocket?.broadcast(event));
+    await ctx.client.logTraversal(from, to, (event) => ctx.activationSocket?.broadcast(event), "manual");
     return textResult({ logged: true, from, to });
   },
 };
@@ -269,9 +283,12 @@ export const reinforceLinkTool = {
   config: {
     title: "Reinforce link",
     description:
-      "Explicitly signals that a link between two notes was useful for the current task, " +
-      "boosting its weight beyond ordinary traversal-on-read tracking. Use this when a " +
-      "linked note materially helped answer the user's question, not for incidental reads.",
+      "Explicitly signals that a link between two notes was useful for the current task, boosting its " +
+      "weight beyond ordinary traversal-on-read tracking. As of AIBRAIN-71, reading a note that surfaced in " +
+      "the same session's most recent activate()/get_weighted_neighbors() result already triggers this " +
+      "automatically at a smaller boost — call this tool only when you want to signal something stronger " +
+      "than that automatic signal, or reinforce a link the automatic mechanism wouldn't have caught (e.g. " +
+      "it materially helped but didn't come from a retrieval call this session).",
     inputSchema: {
       from: z.string().describe("Vault-relative note path, without .md extension"),
       to: z.string().describe("Vault-relative note path, without .md extension"),
@@ -279,7 +296,7 @@ export const reinforceLinkTool = {
     },
   },
   handler: (ctx: ToolContext) => async ({ from, to, boost }: { from: string; to: string; boost?: number }) => {
-    await ctx.client.reinforce(from, to, boost, (event) => ctx.activationSocket?.broadcast(event));
+    await ctx.client.reinforce(from, to, boost, (event) => ctx.activationSocket?.broadcast(event), "explicit");
     return textResult({ reinforced: true, from, to, boost: boost ?? 5 });
   },
 };
@@ -421,9 +438,20 @@ export const readNoteTool = {
       // reading, with no separate call to remember.
       const from = ctx.lastReadNote;
       if (from && from !== path) {
-        await ctx.client.logTraversal(from, path, (event) => ctx.activationSocket?.broadcast(event));
+        await ctx.client.logTraversal(from, path, (event) => ctx.activationSocket?.broadcast(event), "read");
       }
       ctx.lastReadNote = path;
+
+      // Auto-reinforce (AIBRAIN-71): this note surfaced in the session's most
+      // recent retrieval call and is now actually being read — a
+      // deterministic "this retrieval result got acted on" signal, credited
+      // once per retrieval (deleted from the map on credit) so re-reading
+      // the same note doesn't double-count it.
+      const origin = ctx.pendingRetrievals.get(path);
+      if (origin && origin !== path) {
+        await ctx.client.reinforce(origin, path, AUTO_REINFORCE_BOOST, (event) => ctx.activationSocket?.broadcast(event), "auto-retrieval");
+        ctx.pendingRetrievals.delete(path);
+      }
     }
     return textResult(note ?? { error: `No note found at ${path}` });
   },
@@ -467,6 +495,15 @@ export const searchNotesTool = {
       // surfacing in a result list is not the deeper engagement read_note /
       // log_traversal represent, so this must never persist as a weight.
       if (hits.length > 0) await ctx.client.touch(...hits.map((h) => h.path));
+      // AIBRAIN-70: unconditional persisted trace of the search itself,
+      // regardless of whether anything was found or acted on.
+      await ctx.client.logSearch(query, hits.length, useWeights ?? true);
+      // A search result is a retrieval too — if one of these gets actually
+      // read next, that's the same "acted on" signal AIBRAIN-71 credits for
+      // activate()/get_weighted_neighbors() results. There's no single
+      // "origin" note for a text query the way there is for a note-relative
+      // retrieval, so this pending set has no meaningful reinforcement
+      // source note and is intentionally left out of pendingRetrievals.
       return textResult(hits);
     },
 };
@@ -476,5 +513,6 @@ export function makeToolContext(vaultPath: string, instanceId: string): ToolCont
     vaultPath,
     vaultDataDir: resolveDataDir(vaultPath),
     client: initInstance(vaultPath, instanceId),
+    pendingRetrievals: new Map(),
   };
 }
