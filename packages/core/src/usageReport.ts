@@ -70,6 +70,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
   let reinforceExplicitCount = 0;
   let reinforceAutoCount = 0;
   let searchCount = 0;
+  let getWeightedNeighborsCount = 0;
   const activateTierCounts = { activation: 0, keyword: 0, recency: 0 };
   const touchCounts = new Map<string, number>();
 
@@ -104,7 +105,12 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
     }
 
     for (const entry of retrieval) {
-      activateTierCounts[entry.tier]++;
+      // Missing source means this entry predates AIBRAIN-126's field — it can only have come from activate().
+      if ((entry.source ?? "activate") === "get_weighted_neighbors") {
+        getWeightedNeighborsCount++;
+      } else {
+        activateTierCounts[entry.tier ?? "activation"]++;
+      }
     }
   }
 
@@ -159,6 +165,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
       traverse: traverseCount,
       reinforce: { explicit: reinforceExplicitCount, autoRetrieval: reinforceAutoCount },
       activate: activateTierCounts,
+      getWeightedNeighbors: getWeightedNeighborsCount,
       search: searchCount,
     },
     topTouchedNotes,

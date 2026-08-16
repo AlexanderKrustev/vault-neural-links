@@ -152,7 +152,18 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
 
     async getWeightedNeighbors(note: string, topK = 10) {
       await touch(note);
-      return getWeightedNeighbors(vaultDataDir, note, topK, vaultPath, sessionBuffer);
+      const start = Date.now();
+      const neighbors = await getWeightedNeighbors(vaultDataDir, note, topK, vaultPath, sessionBuffer);
+      await appendRetrievalLog(vaultDataDir, instanceId, {
+        ts: new Date().toISOString(),
+        instance: instanceId,
+        note,
+        source: "get_weighted_neighbors",
+        resultCount: neighbors.length,
+        topK,
+        latencyMs: Date.now() - start,
+      });
+      return neighbors;
     },
 
     async activate(
@@ -179,6 +190,7 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
         ts: new Date().toISOString(),
         instance: instanceId,
         note,
+        source: "activate",
         tier: result.tier,
         resultCount: result.notes.length,
         latencyMs: Date.now() - start,

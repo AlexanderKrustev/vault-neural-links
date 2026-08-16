@@ -52,6 +52,7 @@ describe("computeUsageReport", () => {
       traverse: 0,
       reinforce: { explicit: 0, autoRetrieval: 0 },
       activate: { activation: 0, keyword: 0, recency: 0 },
+      getWeightedNeighbors: 0,
       search: 0,
     });
     expect(report.topTouchedNotes).toEqual([]);
@@ -65,8 +66,9 @@ describe("computeUsageReport", () => {
       event({ ts: "2026-08-16T12:05:00.000Z", type: "reinforce", from: "B", to: "C", weight_delta: 5, trigger: "explicit" }),
     ]);
     await writeJsonl(join(dataDir, "retrieval"), "inst-1.jsonl", [
-      retrieval({ tier: "activation" }),
-      retrieval({ tier: "keyword" }),
+      retrieval({ source: "activate", tier: "activation" }),
+      retrieval({ source: "activate", tier: "keyword" }),
+      retrieval({ source: "get_weighted_neighbors", tier: undefined, topK: 10 }),
     ]);
     await writeJsonl(join(dataDir, "search"), "inst-1.jsonl", [search({})]);
 
@@ -76,6 +78,7 @@ describe("computeUsageReport", () => {
     expect(report.mechanismCounts.traverse).toBe(1);
     expect(report.mechanismCounts.reinforce).toEqual({ explicit: 1, autoRetrieval: 0 });
     expect(report.mechanismCounts.activate).toEqual({ activation: 1, keyword: 1, recency: 0 });
+    expect(report.mechanismCounts.getWeightedNeighbors).toBe(1);
     expect(report.mechanismCounts.search).toBe(1);
     expect(report.sessions[0].durationMinutes).toBe(5);
   });

@@ -356,13 +356,18 @@ export interface RetrievalLogEntry {
   ts: string;
   instance: string;
   note: string;
-  tier: "activation" | "keyword" | "recency";
+  /** Which tool produced this entry (AIBRAIN-126). Missing on entries logged before this field existed — treat as "activate". */
+  source?: "activate" | "get_weighted_neighbors";
+  /** Set for source: "activate" only — get_weighted_neighbors is a direct lookup, not a tiered fallback pipeline. */
+  tier?: "activation" | "keyword" | "recency";
   resultCount: number;
   latencyMs: number;
-  /** True if the per-call time budget was exhausted before retrieval finished, so the tier/results served may be partial. */
-  timedOut: boolean;
-  /** How many times activation's min/structuralMinThreshold were relaxed to try to reach minK results. */
-  relaxations: number;
+  /** True if the per-call time budget was exhausted before retrieval finished, so the tier/results served may be partial. Activate-only. */
+  timedOut?: boolean;
+  /** How many times activation's min/structuralMinThreshold were relaxed to try to reach minK results. Activate-only. */
+  relaxations?: number;
+  /** Set for source: "get_weighted_neighbors" only — the topK it was called with. */
+  topK?: number;
 }
 
 
@@ -402,6 +407,8 @@ export interface UsageReportMechanismCounts {
   /** Split by trigger (AIBRAIN-71) so the report can tell explicit reinforce_link use apart from automatic retrieval-then-read reinforcement. */
   reinforce: { explicit: number; autoRetrieval: number };
   activate: { activation: number; keyword: number; recency: number };
+  /** get_weighted_neighbors() call count (AIBRAIN-126) — previously invisible to this report since the tool logged nothing. */
+  getWeightedNeighbors: number;
   search: number;
 }
 

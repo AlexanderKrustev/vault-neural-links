@@ -141,4 +141,26 @@ describe("initInstance", () => {
     });
     expect(lines[0].latencyMs).toBeGreaterThanOrEqual(0);
   });
+
+  it("logs every getWeightedNeighbors call to retrieval-log.jsonl (AIBRAIN-126)", async () => {
+    const client = initInstance(vaultPath, "test-instance");
+    await client.logTraversal("A", "B");
+    await client.reinforce("A", "B", 10);
+    await client.compact();
+
+    const neighbors = await client.getWeightedNeighbors("A", 5);
+
+    const vaultDataDir = join(vaultPath, ".vault-neural-links");
+    const raw = await readFile(retrievalLogFilePath(vaultDataDir, "test-instance"), "utf8");
+    const lines = raw.trim().split("\n").map((line) => JSON.parse(line));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      instance: "test-instance",
+      note: "A",
+      source: "get_weighted_neighbors",
+      resultCount: neighbors.length,
+      topK: 5,
+    });
+    expect(lines[0].latencyMs).toBeGreaterThanOrEqual(0);
+  });
 });

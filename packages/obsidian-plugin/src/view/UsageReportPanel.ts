@@ -81,6 +81,10 @@ export class UsageReportPanel {
       text: `activate: ${report.mechanismCounts.activate.activation} activation / ${report.mechanismCounts.activate.keyword} keyword / ${report.mechanismCounts.activate.recency} recency`,
       cls: "vault-neural-links-usage-line",
     });
+    mechanisms.createDiv({
+      text: `get_weighted_neighbors: ${report.mechanismCounts.getWeightedNeighbors}`,
+      cls: "vault-neural-links-usage-line",
+    });
     mechanisms.createDiv({ text: `search: ${report.mechanismCounts.search}`, cls: "vault-neural-links-usage-line" });
 
     const notes = this.resultsEl.createDiv({ cls: "vault-neural-links-usage-section" });
