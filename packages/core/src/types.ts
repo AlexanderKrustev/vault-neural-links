@@ -1,5 +1,10 @@
 export type EventType = "traverse" | "reinforce" | "decay";
 
+/** What actually caused a "traverse" event — read_note's automatic logging, or log_traversal's manual-credit escape hatch (AIBRAIN-72). */
+export type TraversalTrigger = "read" | "manual";
+/** What actually caused a "reinforce" event — an explicit reinforce_link call, or AIBRAIN-71's automatic retrieval-then-read correlation. */
+export type ReinforceTrigger = "explicit" | "auto-retrieval";
+
 export interface EventLogEntry {
   ts: string;
   instance: string;
@@ -7,6 +12,12 @@ export interface EventLogEntry {
   from: string;
   to: string;
   weight_delta: number;
+  /**
+   * Absent on events logged before this field existed (2026-08-16) — treat
+   * a missing trigger as "read" for traverse events and "explicit" for
+   * reinforce events, since that's all that could have produced them then.
+   */
+  trigger?: TraversalTrigger | ReinforceTrigger;
 }
 
 export interface EdgeRecord {
@@ -352,4 +363,66 @@ export interface RetrievalLogEntry {
   timedOut: boolean;
   /** How many times activation's min/structuralMinThreshold were relaxed to try to reach minK results. */
   relaxations: number;
+}
+
+
+/**
+ * Persisted trace of a search_notes call (AIBRAIN-70). Previously
+ * search_notes only touched the in-memory session buffer and left no trace
+ * on disk at all — this closes that gap so search frequency is measurable
+ * alongside traverse/reinforce/activate, unconditionally regardless of what
+ * the caller does with the results.
+ */
+export interface SearchLogEntry {
+  ts: string;
+  instance: string;
+  query: string;
+  resultCount: number;
+  useWeights: boolean;
+}
+
+
+/**
+ * Personal usage report (AIBRAIN-68) — summarizes the append-only event/
+ * retrieval/session logs back to the user: how often they actually use each
+ * mechanism, which notes get touched most, and how that compares to what
+ * the engine considers important. Computed on demand from disk, not
+ * persisted itself.
+ */
+export interface UsageReportSession {
+  instance: string;
+  firstEventAt: string | null;
+  lastEventAt: string | null;
+  /** Span between firstEventAt and lastEventAt; null if fewer than two timestamped events exist for this instance. */
+  durationMinutes: number | null;
+}
+
+export interface UsageReportMechanismCounts {
+  traverse: number;
+  /** Split by trigger (AIBRAIN-71) so the report can tell explicit reinforce_link use apart from automatic retrieval-then-read reinforcement. */
+  reinforce: { explicit: number; autoRetrieval: number };
+  activate: { activation: number; keyword: number; recency: number };
+  search: number;
+}
+
+export interface UsageReportNoteTouch {
+  path: string;
+  /** Times this note appeared as either endpoint of a traverse/reinforce event. */
+  touches: number;
+  /** PageRank-style importance score (0-1) from note-importance.json, or null if the note isn't scored (e.g. never linked). */
+  importance: number | null;
+}
+
+export interface UsageReport {
+  generatedAt: string;
+  sessionCount: number;
+  sessions: UsageReportSession[];
+  /** Median duration across sessions with a measurable span; null if none. */
+  typicalSessionMinutes: number | null;
+  mechanismCounts: UsageReportMechanismCounts;
+  topTouchedNotes: UsageReportNoteTouch[];
+  /** % overlap between the top-touched notes and the top-importance notes (same N); null if either side is empty. */
+  importanceOverlapPct: number | null;
+  /** Known instrumentation or usage-pattern caveats surfaced alongside the numbers, e.g. mechanisms with no persisted trace. */
+  gaps: string[];
 }

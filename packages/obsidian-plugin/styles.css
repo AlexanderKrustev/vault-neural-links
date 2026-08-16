@@ -214,3 +214,91 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+.vault-neural-links-usage-panel {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 50;
+  width: 300px;
+  max-height: 60%;
+  overflow-y: auto;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.vault-neural-links-usage-panel.is-collapsed {
+  max-height: unset;
+  overflow-y: visible;
+}
+
+.vault-neural-links-usage-panel.is-collapsed .vault-neural-links-usage-panel-body {
+  display: none;
+}
+
+.vault-neural-links-usage-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.vault-neural-links-usage-panel-toggle {
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.vault-neural-links-usage-panel-toggle:hover {
+  color: var(--text-normal);
+}
+
+.vault-neural-links-usage-refresh-btn {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.vault-neural-links-usage-status {
+  color: var(--text-muted);
+}
+
+.vault-neural-links-usage-section {
+  margin-bottom: 8px;
+}
+
+.vault-neural-links-usage-section-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.vault-neural-links-usage-line {
+  padding: 1px 0;
+}
+
+.vault-neural-links-usage-note-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.vault-neural-links-usage-note-path {
+  flex: 1;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.vault-neural-links-usage-note-stats {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.vault-neural-links-usage-gap {
+  color: var(--text-muted);
+  padding: 2px 0;
+}

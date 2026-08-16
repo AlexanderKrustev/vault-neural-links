@@ -1,6 +1,6 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { EventLogEntry, RetrievalLogEntry } from "./types.js";
+import type { EventLogEntry, RetrievalLogEntry, SearchLogEntry } from "./types.js";
 
 // Serializes appends per file so concurrent calls from the same instance
 // can't interleave partial writes (cross-instance safety comes from each
@@ -45,4 +45,21 @@ export async function appendRetrievalLog(
   entry: RetrievalLogEntry,
 ): Promise<void> {
   return queueAppend(retrievalLogFilePath(vaultDataDir, instanceId), `${JSON.stringify(entry)}\n`);
+}
+
+export function searchLogFilePath(vaultDataDir: string, instanceId: string): string {
+  return join(vaultDataDir, "search", `${instanceId}.jsonl`);
+}
+
+/**
+ * Appends one search-log line per search_notes call (AIBRAIN-70) —
+ * unconditional, unlike the old behavior where a search left no trace at
+ * all unless its results happened to get touched/read afterward.
+ */
+export async function appendSearchLog(
+  vaultDataDir: string,
+  instanceId: string,
+  entry: SearchLogEntry,
+): Promise<void> {
+  return queueAppend(searchLogFilePath(vaultDataDir, instanceId), `${JSON.stringify(entry)}\n`);
 }

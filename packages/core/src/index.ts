@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendEvent, appendRetrievalLog } from "./logger.js";
+import { appendEvent, appendRetrievalLog, appendSearchLog } from "./logger.js";
 import { compact } from "./compactor.js";
 import { rebuildStructuralIndex } from "./structuralLinks.js";
 import { getWeightedNeighbors, computeLiveNeighborWeights } from "./query.js";
@@ -14,7 +14,9 @@ import type {
   ActivatedNote,
   ActivationEventSink,
   CompactionResult,
+  ReinforceTrigger,
   SpreadingActivationConfig,
+  TraversalTrigger,
   WeightedNeighbor,
 } from "./types.js";
 
@@ -22,7 +24,7 @@ export * from "./types.js";
 export * from "./parser.js";
 export * from "./decay.js";
 export * from "./priming.js";
-export { appendEvent } from "./logger.js";
+export { appendEvent, appendSearchLog } from "./logger.js";
 export { compact } from "./compactor.js";
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 export { createObsidianAdapter, type SourceAdapter, type SourceNode } from "./adapters.js";
@@ -36,6 +38,7 @@ export { activate } from "./activation.js";
 export { runAblationComparison } from "./ablation.js";
 export { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
 export { resolveDataDir } from "./vaultPaths.js";
+export { computeUsageReport } from "./usageReport.js";
 export * from "./frontmatter.js";
 export * from "./notes.js";
 export * from "./autolink.js";
@@ -44,6 +47,17 @@ export * from "./changelog.js";
 const DEFAULT_REINFORCE_BOOST = 5;
 const DEFAULT_ACTIVATION_ENERGY = 10;
 
+/**
+ * Boost applied when a note that surfaced in a retrieval result (activate /
+ * get_weighted_neighbors) is then actually read (AIBRAIN-71) — a
+ * server-computed proxy for "this retrieval result was acted on", sitting
+ * between passive traversal's implicit weight_delta (1) and an explicit
+ * reinforce_link call's full boost (DEFAULT_REINFORCE_BOOST). Unlike
+ * reinforce_link, this fires automatically and needs no LLM to notice and
+ * decide to call a tool about it.
+ */
+export const AUTO_REINFORCE_BOOST = 3;
+
 export interface VaultLinkClient {
   /**
    * Session-only priming touch, no persisted weight change — for shallow
@@ -51,8 +65,10 @@ export interface VaultLinkClient {
    * mistaken for the deeper engagement logTraversal/reinforce represent.
    */
   touch(...notes: string[]): Promise<void>;
-  logTraversal(from: string, to: string, onEvent?: ActivationEventSink): Promise<void>;
-  reinforce(from: string, to: string, boost?: number, onEvent?: ActivationEventSink): Promise<void>;
+  logTraversal(from: string, to: string, onEvent?: ActivationEventSink, trigger?: TraversalTrigger): Promise<void>;
+  /** Appends an unconditional search-log entry (AIBRAIN-70) — no priming, no weight change, just a persisted trace that a search happened. */
+  logSearch(query: string, resultCount: number, useWeights: boolean): Promise<void>;
+  reinforce(from: string, to: string, boost?: number, onEvent?: ActivationEventSink, trigger?: ReinforceTrigger): Promise<void>;
   getWeightedNeighbors(note: string, topK?: number): Promise<WeightedNeighbor[]>;
   activate(
     note: string,
@@ -88,7 +104,7 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
   return {
     touch,
 
-    async logTraversal(from: string, to: string, onEvent?: ActivationEventSink) {
+    async logTraversal(from: string, to: string, onEvent?: ActivationEventSink, trigger: TraversalTrigger = "read") {
       await touch(from, to);
       const ts = new Date().toISOString();
       await appendEvent(vaultDataDir, instanceId, {
@@ -98,11 +114,18 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
         from,
         to,
         weight_delta: 1,
+        trigger,
       });
       onEvent?.({ type: "edge_traversed", runId: randomUUID(), origin: from, hop: 0, from, to, energy: 1, ts });
     },
 
-    async reinforce(from: string, to: string, boost: number = DEFAULT_REINFORCE_BOOST, onEvent?: ActivationEventSink) {
+    async reinforce(
+      from: string,
+      to: string,
+      boost: number = DEFAULT_REINFORCE_BOOST,
+      onEvent?: ActivationEventSink,
+      trigger: ReinforceTrigger = "explicit",
+    ) {
       await touch(from, to);
       const ts = new Date().toISOString();
       await appendEvent(vaultDataDir, instanceId, {
@@ -112,8 +135,19 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
         from,
         to,
         weight_delta: boost,
+        trigger,
       });
       onEvent?.({ type: "edge_traversed", runId: randomUUID(), origin: from, hop: 0, from, to, energy: boost, ts });
+    },
+
+    async logSearch(query: string, resultCount: number, useWeights: boolean) {
+      await appendSearchLog(vaultDataDir, instanceId, {
+        ts: new Date().toISOString(),
+        instance: instanceId,
+        query,
+        resultCount,
+        useWeights,
+      });
     },
 
     async getWeightedNeighbors(note: string, topK = 10) {

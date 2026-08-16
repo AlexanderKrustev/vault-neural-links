@@ -10,6 +10,7 @@ import { Renderer } from "./Renderer.js";
 import { ActivationPacer } from "./ActivationPacer.js";
 import { RetrievalPathPanel } from "./RetrievalPathPanel.js";
 import { AblationPanel } from "./AblationPanel.js";
+import { UsageReportPanel } from "./UsageReportPanel.js";
 
 export const NEURAL_GRAPH_VIEW_TYPE = "vault-neural-links-view";
 
@@ -24,6 +25,7 @@ export class NeuralGraphView extends ItemView {
   private activationPacer: ActivationPacer | null = null;
   private retrievalPathPanel: RetrievalPathPanel | null = null;
   private ablationPanel: AblationPanel | null = null;
+  private usageReportPanel: UsageReportPanel | null = null;
   private primedNotes: ReadonlySet<string> = new Set();
   private statusEl: HTMLDivElement | null = null;
   private lastWeights: LinkWeightsFile | null = null;
@@ -125,6 +127,9 @@ export class NeuralGraphView extends ItemView {
     );
     this.ablationPanel.mount(container);
 
+    this.usageReportPanel = new UsageReportPanel(`${adapter.getBasePath()}/.vault-neural-links`);
+    this.usageReportPanel.mount(container);
+
     const pacer = new ActivationPacer();
     pacer.setMode(this.plugin.settings.playbackMode);
     pacer.start((event) => this.onActivationEvent(event));
@@ -176,6 +181,8 @@ export class NeuralGraphView extends ItemView {
     this.retrievalPathPanel = null;
     this.ablationPanel?.unmount();
     this.ablationPanel = null;
+    this.usageReportPanel?.unmount();
+    this.usageReportPanel = null;
     this.renderer?.stop();
     this.renderer = null;
     this.sim = null;
