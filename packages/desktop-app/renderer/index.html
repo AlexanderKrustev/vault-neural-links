@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Vault Neural Links</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 24px; background: #14161a; color: #e6e6e6; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.sub { color: #9aa0a6; margin: 0 0 20px; font-size: 13px; }
+      button { background: #3b6ef2; color: white; border: none; padding: 8px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+      button:hover { background: #5382f5; }
+      #folderPath { color: #9aa0a6; font-size: 12px; margin: 10px 0; word-break: break-all; }
+      #summary { display: flex; gap: 24px; margin: 16px 0; }
+      .stat { background: #1e2127; border-radius: 8px; padding: 10px 16px; }
+      .stat .n { font-size: 22px; font-weight: 600; }
+      .stat .label { font-size: 11px; color: #9aa0a6; text-transform: uppercase; letter-spacing: 0.04em; }
+      ul { list-style: none; padding: 0; margin: 16px 0 0; max-height: 420px; overflow-y: auto; }
+      li { display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #22262e; font-size: 13px; }
+      li span.count { color: #9aa0a6; }
+      #error { color: #ff6b6b; font-size: 13px; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Vault Neural Links — desktop shell</h1>
+    <p class="sub">Open an OKF folder (plain markdown + frontmatter, no Obsidian) and run the real engine against it.</p>
+    <button id="openBtn">Open OKF Folder…</button>
+    <div id="folderPath"></div>
+    <div id="summary"></div>
+    <div id="error"></div>
+    <ul id="notes"></ul>
+    <script src="renderer.js"></script>
+  </body>
+</html>
