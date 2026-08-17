@@ -38,3 +38,37 @@ function stripHeadingAndBlockRef(target: string): string {
 function normalizeTarget(target: string): string {
   return target.trim().replace(/\\/g, "/").replace(/^\.\//, "");
 }
+
+/**
+ * OKF/plain-markdown link extraction: `[label](path)` / `[label](path.md)`.
+ * Skips images (`![label](path)`), in-page anchors (`[label](#heading)`),
+ * and external links (any URI with a scheme, e.g. `http://`, `mailto:`).
+ * A trailing " title" attribute (`[label](path "title")`) is dropped, not
+ * parsed. Target is normalized the same way as wikilink targets and has
+ * its `.md` extension stripped, so it lines up with the extension-less
+ * note-path convention `SourceNode.id` already uses elsewhere.
+ */
+const MARKDOWN_LINK_RE = /(!)?\[([^\]]*)\]\(([^)]+)\)/g;
+const EXTERNAL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+
+export function extractOkfLinks(content: string): ParsedLink[] {
+  const links: ParsedLink[] = [];
+
+  for (const match of content.matchAll(MARKDOWN_LINK_RE)) {
+    const isImage = match[1] === "!";
+    if (isImage) continue;
+
+    const label = match[2].trim();
+    const rawTarget = match[3].trim().split(/\s+/)[0];
+    if (!rawTarget || rawTarget.startsWith("#") || EXTERNAL_SCHEME_RE.test(rawTarget)) continue;
+
+    const target = normalizeTarget(rawTarget).replace(/\.md$/i, "");
+    if (!target) continue;
+
+    const bareFilename = target.split("/").pop() ?? target;
+    const alias = label && label.toLowerCase() !== bareFilename.toLowerCase() ? label : undefined;
+    links.push(alias ? { target, alias } : { target });
+  }
+
+  return links;
+}
