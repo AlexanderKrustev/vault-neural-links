@@ -86,8 +86,9 @@ async function persistStructuralIndex(vaultDataDir: string, index: StructuralLin
 export async function rebuildStructuralIndex(
   vaultPath: string,
   vaultDataDir: string,
+  adapter: SourceAdapter = createObsidianAdapter(vaultPath),
 ): Promise<{ noteCount: number; edgeCount: number; builtAt: string }> {
-  const index = await buildStructuralIndex(vaultPath);
+  const index = await buildStructuralIndex(vaultPath, adapter);
   await persistStructuralIndex(vaultDataDir, index);
   return { noteCount: Object.keys(index.edges).length, edgeCount: countEdges(index), builtAt: index.builtAt };
 }

@@ -5,7 +5,7 @@
  * renderer process; everything before this was plain unbundled HTML/JS.
  */
 import { ForceSim, Renderer, type NativeEdge } from "@vault-neural-links/render-core";
-import type { LinkWeightsFile } from "@vault-neural-links/core";
+import type { LinkWeightsFile, SearchHit, ActivatedNote, ActivationTraceEvent } from "@vault-neural-links/core";
 
 interface FolderEdge {
   source: string;
@@ -25,12 +25,20 @@ interface LoginResult {
   reason?: string;
 }
 
+interface ActivateResponse {
+  result: ActivatedNote[];
+  events: ActivationTraceEvent[];
+}
+
 interface VnlApi {
   getSession(): Promise<unknown | null>;
   login(email: string, password: string): Promise<LoginResult>;
   logout(): Promise<{ ok: boolean }>;
   pickFolder(): Promise<string | null>;
   loadFolder(folderPath: string): Promise<FolderSummary>;
+  search(folderPath: string, query: string): Promise<SearchHit[]>;
+  activate(folderPath: string, note: string, energy?: number): Promise<ActivateResponse>;
+  getPrimed(folderPath: string): Promise<string[]>;
 }
 
 declare global {
@@ -53,6 +61,11 @@ const summaryEl = document.getElementById("summary")!;
 const notesEl = document.getElementById("notes")!;
 const errorEl = document.getElementById("error")!;
 const graphCanvas = document.getElementById("graphCanvas") as HTMLCanvasElement;
+const searchInput = document.getElementById("searchInput") as HTMLInputElement;
+const searchBtn = document.getElementById("searchBtn") as HTMLButtonElement;
+const searchResultsEl = document.getElementById("searchResults")!;
+const activationInfoEl = document.getElementById("activationInfo")!;
+const primedListEl = document.getElementById("primedList")!;
 
 function showApp() {
   loginScreen.style.display = "none";
@@ -121,12 +134,18 @@ const EMPTY_WEIGHTS: LinkWeightsFile = { version: 1, compactedAt: new Date().toI
 
 let sim: ForceSim | null = null;
 let renderer: Renderer | null = null;
+let currentFolderPath: string | null = null;
 
 function renderGraph(result: FolderSummary): void {
   if (!sim) {
     sim = new ForceSim();
     renderer = new Renderer(graphCanvas, sim);
     renderer.start();
+    // Clicking a node in the graph is the same "activate from here" action
+    // as clicking a search result — both funnel through activateFrom.
+    renderer.onNodeClicked((id) => {
+      void activateFrom(id);
+    });
   }
   const nativeEdges: NativeEdge[] = result.edges.map((e) => ({ source: e.source, target: e.target }));
   sim.setData(
@@ -136,11 +155,92 @@ function renderGraph(result: FolderSummary): void {
   );
 }
 
+/** Re-reads the session-buffer file engine:primed exposes and reflects it in both the text chip list and the graph's dashed warm ring. */
+async function refreshPrimed(): Promise<void> {
+  if (!currentFolderPath) return;
+  const primed = await window.vnl.getPrimed(currentFolderPath);
+  primedListEl.innerHTML = primed.length > 0 ? primed.map((id) => `<span>${id}</span>`).join("") : "(none yet)";
+  renderer?.setPrimedNotes(new Set(primed));
+}
+
+const HOP_STAGGER_MS = 350;
+
+/**
+ * Runs real spreading activation from `note` via the engine (no mock —
+ * the exact same activate() the MCP `activate` tool calls) and animates
+ * the result: node/edge pulses staggered by hop so it reads as energy
+ * spreading outward, not everything lighting up at once.
+ */
+async function activateFrom(note: string): Promise<void> {
+  if (!currentFolderPath || !sim || !renderer) return;
+  activationInfoEl.textContent = `Activating from ${note}…`;
+
+  const { result, events } = await window.vnl.activate(currentFolderPath, note, 10);
+
+  const byHop = new Map<number, ActivationTraceEvent[]>();
+  for (const event of events) {
+    const list = byHop.get(event.hop) ?? [];
+    list.push(event);
+    byHop.set(event.hop, list);
+  }
+  for (const [hop, hopEvents] of byHop) {
+    setTimeout(() => {
+      for (const event of hopEvents) {
+        if (event.type === "node_activated" && event.node) {
+          sim!.markNodeActivated(event.node, hop);
+        } else if (event.type === "edge_traversed" && event.from && event.to) {
+          sim!.markEdgeTraversed(event.from, event.to);
+          renderer!.pulseEdgeDirectional(event.from, event.to);
+        }
+      }
+    }, hop * HOP_STAGGER_MS);
+  }
+
+  const sorted = [...result].sort((a, b) => a.hops - b.hops || b.energy - a.energy);
+  activationInfoEl.textContent =
+    sorted.length > 0
+      ? `Activated ${sorted.length} note${sorted.length === 1 ? "" : "s"} from ${note}:\n` +
+        sorted.map((n) => `  ${n.path}  (hop ${n.hops}, energy ${n.energy.toFixed(2)})`).join("\n")
+      : `No notes activated from ${note} (isolated, or below the energy threshold).`;
+
+  await refreshPrimed();
+}
+
+function renderSearchResults(hits: SearchHit[]): void {
+  searchResultsEl.innerHTML = "";
+  if (hits.length === 0) {
+    searchResultsEl.innerHTML = "<li>No matches.</li>";
+    return;
+  }
+  for (const hit of hits) {
+    const li = document.createElement("li");
+    const weightLabel = hit.weight !== undefined ? ` · weight ${hit.weight.toFixed(2)}` : "";
+    li.innerHTML = `<span>${hit.path}</span><span class="matched">${hit.matched}${weightLabel}</span>`;
+    li.addEventListener("click", () => void activateFrom(hit.path));
+    searchResultsEl.appendChild(li);
+  }
+}
+
+async function doSearch(): Promise<void> {
+  if (!currentFolderPath) return;
+  const query = searchInput.value.trim();
+  if (!query) return;
+  const hits = await window.vnl.search(currentFolderPath, query);
+  renderSearchResults(hits);
+  await refreshPrimed();
+}
+
+searchBtn.addEventListener("click", () => void doSearch());
+searchInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") void doSearch();
+});
+
 openBtn.addEventListener("click", async () => {
   errorEl.textContent = "";
   const folderPath = await window.vnl.pickFolder();
   if (!folderPath) return;
 
+  currentFolderPath = folderPath;
   folderPathEl.textContent = folderPath;
   summaryEl.innerHTML = "";
   notesEl.innerHTML = "<li>Loading…</li>";
@@ -162,6 +262,9 @@ openBtn.addEventListener("click", async () => {
     }
 
     renderGraph(result);
+    searchResultsEl.innerHTML = "";
+    activationInfoEl.textContent = "Click a node in the graph, or a search result, to run spreading activation from it.";
+    await refreshPrimed();
   } catch (err) {
     errorEl.textContent = String(err && (err as Error).message ? (err as Error).message : err);
     notesEl.innerHTML = "";

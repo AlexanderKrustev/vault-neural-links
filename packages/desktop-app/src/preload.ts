@@ -7,4 +7,9 @@ contextBridge.exposeInMainWorld("vnl", {
 
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke("okf:pick-folder"),
   loadFolder: (folderPath: string) => ipcRenderer.invoke("okf:load-folder", folderPath),
+
+  search: (folderPath: string, query: string) => ipcRenderer.invoke("engine:search", folderPath, query),
+  activate: (folderPath: string, note: string, energy?: number) =>
+    ipcRenderer.invoke("engine:activate", folderPath, note, energy),
+  getPrimed: (folderPath: string) => ipcRenderer.invoke("engine:primed", folderPath),
 });

@@ -10,12 +10,44 @@
  */
 import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   createOkfAdapter,
   buildStructuralIndex,
+  rebuildStructuralIndex,
+  initInstance,
+  searchNotes,
+  resolveDataDir,
+  sessionBufferFilePath,
   type StructuralLinksFile,
+  type VaultLinkClient,
+  type ActivationTraceEvent,
 } from "@vault-neural-links/core";
 import { createMockValidator, readSession, writeSession, clearSession } from "./auth.js";
+
+/**
+ * Fixed instance id (rather than initInstance's default random UUID) so the
+ * session-buffer file it persists to `.vault-neural-links/session/` has a
+ * predictable path — engine:primed reads that same file back to show the
+ * UI what's currently primed. One shared engine session for whichever
+ * folder is currently open; the desktop app only ever has one open at a
+ * time (unlike the MCP server, which serves concurrent sessions).
+ */
+const ENGINE_INSTANCE_ID = "desktop-app";
+
+interface EngineSession {
+  folderPath: string;
+  client: VaultLinkClient;
+}
+
+let currentSession: EngineSession | null = null;
+
+function getSession(folderPath: string): EngineSession {
+  if (!currentSession || currentSession.folderPath !== folderPath) {
+    currentSession = { folderPath, client: initInstance(folderPath, ENGINE_INSTANCE_ID) };
+  }
+  return currentSession;
+}
 
 interface FolderSummary {
   folderPath: string;
@@ -88,11 +120,51 @@ app.whenReady().then(() => {
     const adapter = createOkfAdapter(folderPath);
     const nodes = await adapter.listNodes();
     const index = await buildStructuralIndex(folderPath, adapter);
+
+    // Persist structural-links.json (with the OKF adapter, not the default
+    // Obsidian one) — activate()/getWeightedNeighbors's structural-fallback
+    // tier reads this file from disk, it doesn't take an in-memory index.
+    // Without this, spreading activation silently returns nothing for any
+    // folder that's never had its structural index persisted before.
+    await rebuildStructuralIndex(folderPath, resolveDataDir(folderPath), adapter);
+
     return summarize(
       folderPath,
       index,
       nodes.map((n) => n.id),
     );
+  });
+
+  ipcMain.handle("engine:search", async (_event, folderPath: string, query: string) => {
+    const session = getSession(folderPath);
+    const vaultDataDir = resolveDataDir(folderPath);
+    const hits = await searchNotes(folderPath, query, { vaultDataDir, useWeights: true, topK: 10 });
+    // Searching primes the hits (session-only touch, no persisted weight
+    // change) and logs the search happened — same as the MCP search_notes
+    // tool's behavior, just called directly instead of through an AI client.
+    if (hits.length > 0) await session.client.touch(...hits.map((h) => h.path));
+    await session.client.logSearch(query, hits.length, true);
+    return hits;
+  });
+
+  ipcMain.handle("engine:activate", async (_event, folderPath: string, note: string, energy: number = 10) => {
+    const session = getSession(folderPath);
+    const events: ActivationTraceEvent[] = [];
+    const result = await session.client.activate(note, energy, undefined, (e) => events.push(e));
+    return { result, events };
+  });
+
+  ipcMain.handle("engine:primed", async (_event, folderPath: string): Promise<string[]> => {
+    const vaultDataDir = resolveDataDir(folderPath);
+    const filePath = sessionBufferFilePath(vaultDataDir, ENGINE_INSTANCE_ID);
+    try {
+      const raw = await readFile(filePath, "utf8");
+      const parsed = JSON.parse(raw) as { notes: string[] };
+      return parsed.notes;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
   });
 
   createWindow();
