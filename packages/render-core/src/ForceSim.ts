@@ -15,10 +15,10 @@ import { computeClusterHues, type ClusterAdjacency } from "./ClusterColors.js";
 // compaction (see packages/core/src/query.ts for the same formula, used by
 // MCP-driven queries). Inlined rather than importing @vault-neural-links/core's
 // runtime code, since that package's index bundles Node-only fs/path/crypto
-// modules that can't resolve in this browser-bundled plugin; only its types
-// are safe to import here. The plugin has no synchronous access to each
-// note's frontmatter type, so it applies the global default half-life
-// instead of per-note-type tau.
+// modules that can't resolve in a browser-bundled consumer (Obsidian plugin,
+// Electron renderer); only its types are safe to import here. Neither
+// consumer has synchronous access to each note's frontmatter type, so this
+// applies the global default half-life instead of per-note-type tau.
 const DEFAULT_HALF_LIFE_DAYS = 30;
 
 function liveWeight(baseStrength: number, lastTouched: string, consolidatedScore = 0): number {
@@ -240,9 +240,10 @@ function createClusterForce(
  * Layout is left fully organic — no hardcoded folder-based clustering.
  *
  * Two edge kinds share the same layout: "neural" edges come from the
- * weighted usage graph, "native" edges mirror Obsidian's own [[wikilink]]
- * structure. Native edges pull layout only weakly so the usage-weighted
- * graph still dominates the shape.
+ * weighted usage graph, "native" edges mirror the source's own explicit
+ * link structure (Obsidian [[wikilinks]], OKF markdown links, etc.). Native
+ * edges pull layout only weakly so the usage-weighted graph still dominates
+ * the shape.
  *
  * By default the simulation runs its normal cold-start "explode" animation
  * and then settles, matching Obsidian's own graph view. Continuous mode
@@ -254,7 +255,7 @@ export class ForceSim {
   private edges: SimEdge[] = [];
   private maxWeight = 0;
   private degree = new Map<string, number>();
-  /** most recent lastTouched among each note's incident "neural" (usage) edges — native wikilinks don't carry recency */
+  /** most recent lastTouched among each note's incident "neural" (usage) edges — native links don't carry recency */
   private lastTouched = new Map<string, string>();
   /** max consolidatedScore across each note's incident neural edges — >0 means "consolidated into long-term memory" */
   private consolidated = new Map<string, number>();
@@ -433,7 +434,7 @@ export class ForceSim {
       const clusterEdges = edges.map((e) => ({
         source: e.source as string,
         target: e.target as string,
-        // native (wikilink) edges carry no usage weight — treat them as a
+        // native (structural) edges carry no usage weight — treat them as a
         // fixed moderate pull so structural links still shape communities
         weight: e.kind === "native" ? 1 : e.weight,
       }));

@@ -1,0 +1,38 @@
+{
+  "name": "@vault-neural-links/render-core",
+  "version": "0.0.0",
+  "description": "Shared graph-visualization codepath (force layout, canvas renderer, clustering/hue assignment) — used by the Obsidian plugin and the standalone desktop app so both stay on one rendering implementation instead of two.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "d3-force": "^3.0.0"
+  },
+  "peerDependencies": {
+    "@vault-neural-links/core": "*"
+  },
+  "devDependencies": {
+    "@types/d3-force": "^3.0.0",
+    "@vault-neural-links/core": "*",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0"
+  }
+}

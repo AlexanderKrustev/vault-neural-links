@@ -146,6 +146,10 @@ function drawStruckEdge(
  * - Edge opacity/color fades toward muted as lastTouched ages, independent of weight
  * - Reinforcement pulse: brief animation when a reinforce event lands
  * - Interaction: click node → open note; hover edge → tooltip (weight, traverseCount, lastTouched)
+ *
+ * Plain-DOM only (standard classList/textContent, no host-app prototype
+ * extensions) so this runs identically inside Obsidian's plugin sandbox and
+ * a bare Electron renderer — see AIBRAIN-63's render-core extraction.
  */
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
@@ -592,17 +596,16 @@ export class Renderer {
 
     if (!this.tooltipEl) {
       this.tooltipEl = document.createElement("div");
-      this.tooltipEl.addClass("vault-neural-links-tooltip");
+      this.tooltipEl.classList.add("vault-neural-links-tooltip");
       this.canvas.parentElement?.appendChild(this.tooltipEl);
     }
 
     const source = resolvedNode(edge.source);
     const target = resolvedNode(edge.target);
-    this.tooltipEl.setText(
+    this.tooltipEl.textContent =
       edge.kind === "native"
-        ? `${source?.id ?? "?"} ↔ ${target?.id ?? "?"}\n(native wikilink)`
-        : `${source?.id ?? "?"} ↔ ${target?.id ?? "?"}\nweight: ${edge.weight.toFixed(2)}\nlast touched: ${edge.lastTouched}`,
-    );
+        ? `${source?.id ?? "?"} ↔ ${target?.id ?? "?"}\n(native link)`
+        : `${source?.id ?? "?"} ↔ ${target?.id ?? "?"}\nweight: ${edge.weight.toFixed(2)}\nlast touched: ${edge.lastTouched}`;
     this.tooltipEl.style.left = `${evt.clientX + 12}px`;
     this.tooltipEl.style.top = `${evt.clientY + 12}px`;
   }

@@ -9,10 +9,9 @@
   },
   "dependencies": {
     "@vault-neural-links/core": "*",
-    "d3-force": "^3.0.0"
+    "@vault-neural-links/render-core": "*"
   },
   "devDependencies": {
-    "@types/d3-force": "^3.0.0",
     "esbuild": "^0.23.0",
     "obsidian": "latest",
     "typescript": "^5.5.0"
