@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.log
 packages/obsidian-plugin/main.js
+packages/desktop-app/renderer/bundle.js
 
 # runtime data (per spec: single source of truth is a generated file, not checked in)
 data/events/*.jsonl

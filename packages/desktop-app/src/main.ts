@@ -22,6 +22,8 @@ interface FolderSummary {
   noteCount: number;
   edgeCount: number;
   notes: { id: string; neighborCount: number }[];
+  /** Deduped undirected edge list (each pair once, not both directions) — for the renderer's ForceSim/Renderer graph. */
+  edges: { source: string; target: string }[];
 }
 
 function summarize(folderPath: string, index: StructuralLinksFile, noteIds: string[]): FolderSummary {
@@ -29,7 +31,21 @@ function summarize(folderPath: string, index: StructuralLinksFile, noteIds: stri
     .map((id) => ({ id, neighborCount: index.edges[id]?.length ?? 0 }))
     .sort((a, b) => a.id.localeCompare(b.id));
   const edgeCount = Object.values(index.edges).reduce((sum, n) => sum + n.length, 0) / 2;
-  return { folderPath, noteCount: noteIds.length, edgeCount, notes };
+
+  // buildStructuralIndex's adjacency is undirected but stored both ways
+  // (a->b and b->a) — dedup to one pair per edge for the renderer.
+  const seen = new Set<string>();
+  const edges: { source: string; target: string }[] = [];
+  for (const [source, neighbors] of Object.entries(index.edges)) {
+    for (const target of neighbors) {
+      const key = source < target ? `${source}|${target}` : `${target}|${source}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push({ source, target });
+    }
+  }
+
+  return { folderPath, noteCount: noteIds.length, edgeCount, notes, edges };
 }
 
 function createWindow(): void {
