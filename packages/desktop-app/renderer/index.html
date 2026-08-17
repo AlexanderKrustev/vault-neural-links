@@ -18,16 +18,43 @@
       li { display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #22262e; font-size: 13px; }
       li span.count { color: #9aa0a6; }
       #error { color: #ff6b6b; font-size: 13px; margin-top: 10px; }
+
+      #loginScreen { max-width: 320px; margin: 60px auto; }
+      #loginScreen h1 { text-align: center; }
+      #loginScreen .sub { text-align: center; }
+      #loginScreen label { display: block; font-size: 12px; color: #9aa0a6; margin: 14px 0 4px; }
+      #loginScreen input { width: 100%; box-sizing: border-box; background: #1e2127; border: 1px solid #2c3038; color: #e6e6e6; border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+      #loginScreen button { width: 100%; margin-top: 18px; padding: 10px; }
+      #loginError { color: #ff6b6b; font-size: 13px; margin-top: 10px; min-height: 16px; }
+      #demoHint { color: #6b7280; font-size: 11px; margin-top: 18px; text-align: center; }
+      #appScreen { display: none; }
+      #logoutBtn { float: right; background: transparent; border: 1px solid #2c3038; }
+      #logoutBtn:hover { background: #1e2127; }
     </style>
   </head>
   <body>
-    <h1>Vault Neural Links — desktop shell</h1>
-    <p class="sub">Open an OKF folder (plain markdown + frontmatter, no Obsidian) and run the real engine against it.</p>
-    <button id="openBtn">Open OKF Folder…</button>
-    <div id="folderPath"></div>
-    <div id="summary"></div>
-    <div id="error"></div>
-    <ul id="notes"></ul>
+    <section id="loginScreen">
+      <h1>Vault Neural Links</h1>
+      <p class="sub">Sign in to continue.</p>
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <button id="loginBtn">Log in</button>
+      <div id="loginError"></div>
+      <div id="demoHint">Mock account for now — demo@vaultneurallinks.dev / demo1234. Swapped for a real subscription check once AIBRAIN-73 exists.</div>
+    </section>
+
+    <section id="appScreen">
+      <button id="logoutBtn">Log out</button>
+      <h1>Vault Neural Links — desktop shell</h1>
+      <p class="sub">Open an OKF folder (plain markdown + frontmatter, no Obsidian) and run the real engine against it.</p>
+      <button id="openBtn">Open OKF Folder…</button>
+      <div id="folderPath"></div>
+      <div id="summary"></div>
+      <div id="error"></div>
+      <ul id="notes"></ul>
+    </section>
     <script src="renderer.js"></script>
   </body>
 </html>

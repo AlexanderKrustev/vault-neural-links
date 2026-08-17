@@ -15,6 +15,7 @@ import {
   buildStructuralIndex,
   type StructuralLinksFile,
 } from "@vault-neural-links/core";
+import { createMockValidator, readSession, writeSession, clearSession } from "./auth.js";
 
 interface FolderSummary {
   folderPath: string;
@@ -46,6 +47,22 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  const validator = createMockValidator();
+  const sessionPath = join(app.getPath("userData"), "session.json");
+
+  ipcMain.handle("auth:get-session", async () => readSession(sessionPath));
+
+  ipcMain.handle("auth:login", async (_event, email: string, password: string) => {
+    const result = await validator.login(email, password);
+    if (result.ok && result.session) await writeSession(sessionPath, result.session);
+    return result;
+  });
+
+  ipcMain.handle("auth:logout", async () => {
+    await clearSession(sessionPath);
+    return { ok: true };
+  });
+
   ipcMain.handle("okf:pick-folder", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
     return result.canceled ? null : result.filePaths[0];
