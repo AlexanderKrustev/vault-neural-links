@@ -10,19 +10,39 @@
  */
 import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import { join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import {
   createOkfAdapter,
+  createObsidianAdapter,
   buildStructuralIndex,
   rebuildStructuralIndex,
   initInstance,
   searchNotes,
   resolveDataDir,
   sessionBufferFilePath,
+  type SourceAdapter,
   type StructuralLinksFile,
   type VaultLinkClient,
   type ActivationTraceEvent,
 } from "@vault-neural-links/core";
+
+/**
+ * "obsidian" reuses the exact same adapter/dual-syntax-link behavior the
+ * plugin gets — pointing this app at an existing Obsidian vault instead of
+ * migrating to OKF is a first-class, equally-supported choice, not a
+ * lesser fallback. More sources (Confluence, Azure Wiki, Word — AIBRAIN-34)
+ * land in later versions; the setup screen shows them as coming soon.
+ */
+type SourceType = "okf" | "obsidian";
+
+function createAdapter(folderPath: string, sourceType: SourceType): SourceAdapter {
+  return sourceType === "obsidian" ? createObsidianAdapter(folderPath) : createOkfAdapter(folderPath);
+}
+
+interface Workspace {
+  folderPath: string;
+  sourceType: SourceType;
+}
 import { createMockValidator, readSession, writeSession, clearSession } from "./auth.js";
 
 /**
@@ -111,29 +131,48 @@ app.whenReady().then(() => {
     return { ok: true };
   });
 
-  ipcMain.handle("okf:pick-folder", async () => {
+  const workspacePath = join(app.getPath("userData"), "workspace.json");
+
+  ipcMain.handle("workspace:get", async (): Promise<Workspace | null> => {
+    try {
+      return JSON.parse(await readFile(workspacePath, "utf8")) as Workspace;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
+  });
+
+  ipcMain.handle("workspace:set", async (_event, folderPath: string, sourceType: SourceType) => {
+    await writeFile(workspacePath, JSON.stringify({ folderPath, sourceType } satisfies Workspace, null, 2), "utf8");
+    return { ok: true };
+  });
+
+  ipcMain.handle("workspace:pick-folder", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
     return result.canceled ? null : result.filePaths[0];
   });
 
-  ipcMain.handle("okf:load-folder", async (_event, folderPath: string): Promise<FolderSummary> => {
-    const adapter = createOkfAdapter(folderPath);
-    const nodes = await adapter.listNodes();
-    const index = await buildStructuralIndex(folderPath, adapter);
+  ipcMain.handle(
+    "workspace:load-folder",
+    async (_event, folderPath: string, sourceType: SourceType): Promise<FolderSummary> => {
+      const adapter = createAdapter(folderPath, sourceType);
+      const nodes = await adapter.listNodes();
+      const index = await buildStructuralIndex(folderPath, adapter);
 
-    // Persist structural-links.json (with the OKF adapter, not the default
-    // Obsidian one) — activate()/getWeightedNeighbors's structural-fallback
-    // tier reads this file from disk, it doesn't take an in-memory index.
-    // Without this, spreading activation silently returns nothing for any
-    // folder that's never had its structural index persisted before.
-    await rebuildStructuralIndex(folderPath, resolveDataDir(folderPath), adapter);
+      // Persist structural-links.json with the *chosen* adapter — activate()/
+      // getWeightedNeighbors's structural-fallback tier reads this file from
+      // disk, it doesn't take an in-memory index. Without this, spreading
+      // activation silently returns nothing for any folder that's never had
+      // its structural index persisted before.
+      await rebuildStructuralIndex(folderPath, resolveDataDir(folderPath), adapter);
 
-    return summarize(
-      folderPath,
-      index,
-      nodes.map((n) => n.id),
-    );
-  });
+      return summarize(
+        folderPath,
+        index,
+        nodes.map((n) => n.id),
+      );
+    },
+  );
 
   ipcMain.handle("engine:search", async (_event, folderPath: string, query: string) => {
     const session = getSession(folderPath);

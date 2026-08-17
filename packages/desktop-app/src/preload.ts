@@ -5,8 +5,12 @@ contextBridge.exposeInMainWorld("vnl", {
   login: (email: string, password: string) => ipcRenderer.invoke("auth:login", email, password),
   logout: () => ipcRenderer.invoke("auth:logout"),
 
-  pickFolder: (): Promise<string | null> => ipcRenderer.invoke("okf:pick-folder"),
-  loadFolder: (folderPath: string) => ipcRenderer.invoke("okf:load-folder", folderPath),
+  getWorkspace: () => ipcRenderer.invoke("workspace:get"),
+  setWorkspace: (folderPath: string, sourceType: string) =>
+    ipcRenderer.invoke("workspace:set", folderPath, sourceType),
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke("workspace:pick-folder"),
+  loadFolder: (folderPath: string, sourceType: string) =>
+    ipcRenderer.invoke("workspace:load-folder", folderPath, sourceType),
 
   search: (folderPath: string, query: string) => ipcRenderer.invoke("engine:search", folderPath, query),
   activate: (folderPath: string, note: string, energy?: number) =>

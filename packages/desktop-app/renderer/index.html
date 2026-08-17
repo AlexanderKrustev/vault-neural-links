@@ -43,9 +43,43 @@
       #appScreen { display: none; }
       #logoutBtn { float: right; background: transparent; border: 1px solid #2c3038; }
       #logoutBtn:hover { background: #1e2127; }
+
+      #setupScreen { display: none; max-width: 520px; margin: 60px auto; }
+      #setupScreen h1 { text-align: center; }
+      #setupScreen .sub { text-align: center; }
+      .source-options { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; }
+      .source-option { display: block; width: 100%; text-align: left; background: #1e2127; border: 1px solid #2c3038; border-radius: 8px; padding: 14px 16px; cursor: pointer; }
+      .source-option:hover:not(:disabled) { background: #262a32; border-color: #3b6ef2; }
+      .source-option .title { font-size: 14px; font-weight: 600; color: #e6e6e6; }
+      .source-option .desc { font-size: 12px; color: #9aa0a6; margin-top: 4px; }
+      .source-option:disabled { cursor: not-allowed; opacity: 0.5; }
+      .source-option .badge { float: right; font-size: 10px; color: #9aa0a6; background: #14161a; border: 1px solid #2c3038; border-radius: 10px; padding: 2px 8px; }
+      #switchSourceBtn { background: transparent; border: 1px solid #2c3038; margin-left: 8px; }
+      #switchSourceBtn:hover { background: #1e2127; }
     </style>
   </head>
   <body>
+    <section id="setupScreen">
+      <h1>Get started</h1>
+      <p class="sub">Point Vault Neural Links at where your notes live.</p>
+      <div class="source-options">
+        <button class="source-option" id="chooseOkfBtn">
+          <span class="title">OKF folder</span>
+          <div class="desc">Plain markdown + frontmatter, no Obsidian required. Pick an existing folder or create a new one.</div>
+        </button>
+        <button class="source-option" id="chooseObsidianBtn">
+          <span class="title">Existing Obsidian vault</span>
+          <div class="desc">Point at a vault you already have — wikilinks and OKF-style links both work.</div>
+        </button>
+        <button class="source-option" disabled title="Coming in a later version">
+          <span class="badge">Coming soon</span>
+          <span class="title">Confluence / Azure Wiki / Word</span>
+          <div class="desc">AI-inferred links for sources with no explicit link syntax of their own.</div>
+        </button>
+      </div>
+      <div id="setupError" class="sub" style="color:#ff6b6b; margin-top: 16px;"></div>
+    </section>
+
     <section id="loginScreen">
       <h1>Vault Neural Links</h1>
       <p class="sub">Sign in to continue.</p>
@@ -60,9 +94,9 @@
 
     <section id="appScreen">
       <button id="logoutBtn">Log out</button>
+      <button id="switchSourceBtn">Switch source…</button>
       <h1>Vault Neural Links — desktop shell</h1>
-      <p class="sub">Open an OKF folder (plain markdown + frontmatter, no Obsidian) and run the real engine against it.</p>
-      <button id="openBtn">Open OKF Folder…</button>
+      <p class="sub">The real engine, running against your notes — no Obsidian required.</p>
       <div id="folderPath"></div>
       <div id="summary"></div>
       <div id="error"></div>

@@ -30,12 +30,21 @@ interface ActivateResponse {
   events: ActivationTraceEvent[];
 }
 
+type SourceType = "okf" | "obsidian";
+
+interface Workspace {
+  folderPath: string;
+  sourceType: SourceType;
+}
+
 interface VnlApi {
   getSession(): Promise<unknown | null>;
   login(email: string, password: string): Promise<LoginResult>;
   logout(): Promise<{ ok: boolean }>;
+  getWorkspace(): Promise<Workspace | null>;
+  setWorkspace(folderPath: string, sourceType: SourceType): Promise<{ ok: boolean }>;
   pickFolder(): Promise<string | null>;
-  loadFolder(folderPath: string): Promise<FolderSummary>;
+  loadFolder(folderPath: string, sourceType: SourceType): Promise<FolderSummary>;
   search(folderPath: string, query: string): Promise<SearchHit[]>;
   activate(folderPath: string, note: string, energy?: number): Promise<ActivateResponse>;
   getPrimed(folderPath: string): Promise<string[]>;
@@ -47,6 +56,7 @@ declare global {
   }
 }
 
+const setupScreen = document.getElementById("setupScreen")!;
 const loginScreen = document.getElementById("loginScreen")!;
 const appScreen = document.getElementById("appScreen")!;
 const emailEl = document.getElementById("email") as HTMLInputElement;
@@ -55,7 +65,11 @@ const loginBtn = document.getElementById("loginBtn") as HTMLButtonElement;
 const loginErrorEl = document.getElementById("loginError")!;
 const logoutBtn = document.getElementById("logoutBtn")!;
 
-const openBtn = document.getElementById("openBtn")!;
+const chooseOkfBtn = document.getElementById("chooseOkfBtn")!;
+const chooseObsidianBtn = document.getElementById("chooseObsidianBtn")!;
+const setupErrorEl = document.getElementById("setupError")!;
+const switchSourceBtn = document.getElementById("switchSourceBtn")!;
+
 const folderPathEl = document.getElementById("folderPath")!;
 const summaryEl = document.getElementById("summary")!;
 const notesEl = document.getElementById("notes")!;
@@ -68,12 +82,20 @@ const activationInfoEl = document.getElementById("activationInfo")!;
 const primedListEl = document.getElementById("primedList")!;
 
 function showApp() {
+  setupScreen.style.display = "none";
   loginScreen.style.display = "none";
   appScreen.style.display = "block";
 }
 
 function showLogin() {
+  setupScreen.style.display = "none";
   loginScreen.style.display = "block";
+  appScreen.style.display = "none";
+}
+
+function showSetup() {
+  setupScreen.style.display = "block";
+  loginScreen.style.display = "none";
   appScreen.style.display = "none";
 }
 
@@ -89,7 +111,7 @@ async function attemptLogin() {
   try {
     const result = await window.vnl.login(email, password);
     if (result.ok) {
-      showApp();
+      await enterAppOrSetup();
     } else {
       loginErrorEl.textContent = result.reason || "Login failed.";
     }
@@ -113,7 +135,7 @@ logoutBtn.addEventListener("click", async () => {
 (async function initSession() {
   const session = await window.vnl.getSession();
   if (session) {
-    showApp();
+    await enterAppOrSetup();
   } else {
     showLogin();
   }
@@ -235,18 +257,21 @@ searchInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") void doSearch();
 });
 
-openBtn.addEventListener("click", async () => {
+/**
+ * Loads a folder with the given adapter type and renders everything —
+ * summary stats, note list, graph, and a reset of the search/activation
+ * panels. Shared by the setup screen's first-time picker and by
+ * enterAppOrSetup's silent auto-load of a previously-configured workspace.
+ */
+async function loadAndShowFolder(folderPath: string, sourceType: SourceType): Promise<void> {
   errorEl.textContent = "";
-  const folderPath = await window.vnl.pickFolder();
-  if (!folderPath) return;
-
   currentFolderPath = folderPath;
-  folderPathEl.textContent = folderPath;
+  folderPathEl.textContent = `${folderPath}  (${sourceType === "obsidian" ? "Obsidian vault" : "OKF folder"})`;
   summaryEl.innerHTML = "";
   notesEl.innerHTML = "<li>Loading…</li>";
 
   try {
-    const result = await window.vnl.loadFolder(folderPath);
+    const result = await window.vnl.loadFolder(folderPath, sourceType);
     summaryEl.innerHTML = "";
     summaryEl.appendChild(stat(result.noteCount, "notes"));
     summaryEl.appendChild(stat(result.edgeCount, "edges"));
@@ -265,8 +290,31 @@ openBtn.addEventListener("click", async () => {
     searchResultsEl.innerHTML = "";
     activationInfoEl.textContent = "Click a node in the graph, or a search result, to run spreading activation from it.";
     await refreshPrimed();
+    showApp();
   } catch (err) {
     errorEl.textContent = String(err && (err as Error).message ? (err as Error).message : err);
     notesEl.innerHTML = "";
   }
-});
+}
+
+/** After login (or on relaunch with an existing session): silently resume the last workspace, or send a first-time user to the setup screen. */
+async function enterAppOrSetup(): Promise<void> {
+  const workspace = await window.vnl.getWorkspace();
+  if (workspace) {
+    await loadAndShowFolder(workspace.folderPath, workspace.sourceType);
+  } else {
+    showSetup();
+  }
+}
+
+async function chooseSource(sourceType: SourceType): Promise<void> {
+  setupErrorEl.textContent = "";
+  const folderPath = await window.vnl.pickFolder();
+  if (!folderPath) return;
+  await window.vnl.setWorkspace(folderPath, sourceType);
+  await loadAndShowFolder(folderPath, sourceType);
+}
+
+chooseOkfBtn.addEventListener("click", () => void chooseSource("okf"));
+chooseObsidianBtn.addEventListener("click", () => void chooseSource("obsidian"));
+switchSourceBtn.addEventListener("click", () => showSetup());

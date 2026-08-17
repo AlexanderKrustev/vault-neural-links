@@ -5,6 +5,9 @@ packages/obsidian-plugin/main.js
 packages/desktop-app/renderer/bundle.js
 packages/desktop-app/sample-okf-large/
 
+# runtime data written by the engine into whatever folder it's pointed at
+**/.vault-neural-links/
+
 # runtime data (per spec: single source of truth is a generated file, not checked in)
 data/events/*.jsonl
 data/link-weights.json
