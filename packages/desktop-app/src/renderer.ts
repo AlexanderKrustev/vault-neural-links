@@ -272,18 +272,7 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opt
 
   try {
     const result = await window.vnl.loadFolder(folderPath, sourceType);
-    if (opts.persist) {
-      // Validate before committing: a folder with no .md files loads "successfully" (0
-      // notes, empty graph) rather than throwing, so without this check a first-time pick
-      // of the wrong folder — or the right folder but the wrong source type — would get
-      // persisted as the workspace and greet the user with an empty app on every relaunch.
-      // A silently-resumed workspace (opts.persist unset) is deliberately not re-validated
-      // this way — an existing vault that's temporarily empty shouldn't get evicted.
-      if (result.noteCount === 0) {
-        throw new Error(`No .md files found in "${folderPath}". Pick a folder that contains your notes.`);
-      }
-      await window.vnl.setWorkspace(folderPath, sourceType);
-    }
+    if (opts.persist) await window.vnl.setWorkspace(folderPath, sourceType);
 
     summaryEl.innerHTML = "";
     summaryEl.appendChild(stat(result.noteCount, "notes"));
