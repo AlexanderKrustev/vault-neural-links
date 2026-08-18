@@ -43,6 +43,13 @@ export { activate } from "./activation.js";
 export { runAblationComparison } from "./ablation.js";
 export { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
 export { resolveDataDir } from "./vaultPaths.js";
+export {
+  accountSessionPath,
+  readAccountSession,
+  writeAccountSession,
+  clearAccountSession,
+  type AccountSession,
+} from "./accountSession.js";
 export { computeUsageReport } from "./usageReport.js";
 export * from "./frontmatter.js";
 export * from "./notes.js";

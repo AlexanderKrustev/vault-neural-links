@@ -20,6 +20,9 @@ import {
   searchNotes,
   resolveDataDir,
   sessionBufferFilePath,
+  accountSessionPath,
+  writeAccountSession,
+  clearAccountSession,
   type SourceAdapter,
   type StructuralLinksFile,
   type VaultLinkClient,
@@ -122,12 +125,20 @@ app.whenReady().then(() => {
 
   ipcMain.handle("auth:login", async (_event, email: string, password: string) => {
     const result = await validator.login(email, password);
-    if (result.ok && result.session) await writeSession(sessionPath, result.session);
+    if (result.ok && result.session) {
+      await writeSession(sessionPath, result.session);
+      // Also written to the fixed cross-app location (see core's accountSession.ts) —
+      // this app is the single auth surface per the 2026-08-18 architecture decision,
+      // so this is what a future Obsidian-plugin-side check would read to skip its own
+      // license-key login. Not yet consumed by the plugin; this is the write half only.
+      await writeAccountSession(accountSessionPath(), result.session);
+    }
     return result;
   });
 
   ipcMain.handle("auth:logout", async () => {
     await clearSession(sessionPath);
+    await clearAccountSession(accountSessionPath());
     return { ok: true };
   });
 
