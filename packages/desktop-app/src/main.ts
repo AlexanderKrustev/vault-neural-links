@@ -8,7 +8,7 @@
  * just "open an OKF folder, run the real engine against it, render the
  * result" end to end.
  */
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import {
@@ -46,7 +46,8 @@ interface Workspace {
   folderPath: string;
   sourceType: SourceType;
 }
-import { createMockValidator, readSession, writeSession, clearSession } from "./auth.js";
+import { loginWithBrowser, refreshTokens, readTokens, writeTokens, clearTokens, type StoredTokens } from "./auth.js";
+import { startMockIdp } from "./mockIdp.js";
 
 /**
  * Fixed instance id (rather than initInstance's default random UUID) so the
@@ -117,27 +118,68 @@ function createWindow(): void {
   win.loadFile(join(__dirname, "..", "renderer", "index.html"));
 }
 
-app.whenReady().then(() => {
-  const validator = createMockValidator();
-  const sessionPath = join(app.getPath("userData"), "session.json");
+app.whenReady().then(async () => {
+  // Dev-only stand-in for AIBRAIN-73's real OAuth endpoint — see mockIdp.ts. Swapping
+  // to the real backend later is an authHost change here, not a rewrite of the flow.
+  const idp = await startMockIdp();
+  const oauthConfig = { authHost: idp.authHost };
+  const tokensPath = join(app.getPath("userData"), "tokens.json");
 
-  ipcMain.handle("auth:get-session", async () => readSession(sessionPath));
+  /**
+   * Returns the current tokens if the access token is still fresh, silently refreshes
+   * them if it's expired (or about to be), or clears everything and returns null if
+   * the refresh token itself is no longer valid — the same three-way outcome Claude
+   * Code/Desktop's own token refresh has. Every refresh rewrites the cross-app
+   * hand-off file too, so the Obsidian plugin's copy of the access token never goes
+   * stale for longer than one refresh cycle.
+   */
+  async function getValidTokens(): Promise<StoredTokens | null> {
+    const tokens = await readTokens(tokensPath);
+    if (!tokens) return null;
+    if (new Date(tokens.expiresAt).getTime() > Date.now() + 30_000) return tokens;
 
-  ipcMain.handle("auth:login", async (_event, email: string, password: string) => {
-    const result = await validator.login(email, password);
-    if (result.ok && result.session) {
-      await writeSession(sessionPath, result.session);
-      // Also written to the fixed cross-app location (see core's accountSession.ts) —
-      // this app is the single auth surface per the 2026-08-18 architecture decision,
-      // so this is what a future Obsidian-plugin-side check would read to skip its own
-      // license-key login. Not yet consumed by the plugin; this is the write half only.
-      await writeAccountSession(accountSessionPath(), result.session);
+    try {
+      const refreshed = await refreshTokens(oauthConfig, tokens.refreshToken);
+      await writeTokens(tokensPath, refreshed);
+      await writeAccountSession(accountSessionPath(), {
+        accessToken: refreshed.accessToken,
+        expiresAt: refreshed.expiresAt,
+        email: refreshed.email,
+        plan: refreshed.plan,
+      });
+      return refreshed;
+    } catch {
+      await clearTokens(tokensPath);
+      await clearAccountSession(accountSessionPath());
+      return null;
     }
-    return result;
+  }
+
+  ipcMain.handle("auth:get-session", async () => {
+    const tokens = await getValidTokens();
+    return tokens ? { email: tokens.email, plan: tokens.plan } : null;
+  });
+
+  ipcMain.handle("auth:login", async () => {
+    const result = await loginWithBrowser(oauthConfig, (url) => shell.openExternal(url));
+    if (result.ok && result.tokens) {
+      await writeTokens(tokensPath, result.tokens);
+      // Access token only, never the refresh token — see core's accountSession.ts.
+      // This app is the single auth surface per the 2026-08-18 architecture decision;
+      // this is what a future Obsidian-plugin-side check would read to skip its own
+      // license-key login. Not yet consumed by the plugin (AIBRAIN-128); write half only.
+      await writeAccountSession(accountSessionPath(), {
+        accessToken: result.tokens.accessToken,
+        expiresAt: result.tokens.expiresAt,
+        email: result.tokens.email,
+        plan: result.tokens.plan,
+      });
+    }
+    return { ok: result.ok, reason: result.reason };
   });
 
   ipcMain.handle("auth:logout", async () => {
-    await clearSession(sessionPath);
+    await clearTokens(tokensPath);
     await clearAccountSession(accountSessionPath());
     return { ok: true };
   });

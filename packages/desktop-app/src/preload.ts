@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("vnl", {
   getSession: () => ipcRenderer.invoke("auth:get-session"),
-  login: (email: string, password: string) => ipcRenderer.invoke("auth:login", email, password),
+  login: () => ipcRenderer.invoke("auth:login"),
   logout: () => ipcRenderer.invoke("auth:logout"),
 
   getWorkspace: () => ipcRenderer.invoke("workspace:get"),

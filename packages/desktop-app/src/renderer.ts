@@ -38,14 +38,13 @@ interface Workspace {
 }
 
 interface SessionInfo {
-  email: string;
-  plan: string;
-  loggedInAt: string;
+  email?: string;
+  plan?: string;
 }
 
 interface VnlApi {
   getSession(): Promise<SessionInfo | null>;
-  login(email: string, password: string): Promise<LoginResult>;
+  login(): Promise<LoginResult>;
   logout(): Promise<{ ok: boolean }>;
   getWorkspace(): Promise<Workspace | null>;
   setWorkspace(folderPath: string, sourceType: SourceType): Promise<{ ok: boolean }>;
@@ -65,8 +64,6 @@ declare global {
 const setupScreen = document.getElementById("setupScreen")!;
 const loginScreen = document.getElementById("loginScreen")!;
 const appScreen = document.getElementById("appScreen")!;
-const emailEl = document.getElementById("email") as HTMLInputElement;
-const passwordEl = document.getElementById("password") as HTMLInputElement;
 const loginBtn = document.getElementById("loginBtn") as HTMLButtonElement;
 const loginErrorEl = document.getElementById("loginError")!;
 const logoutBtn = document.getElementById("logoutBtn")!;
@@ -131,17 +128,18 @@ async function showObsidianCompanion(): Promise<void> {
   obsidianAccountEmailEl.textContent = session?.email ?? "";
 }
 
+/**
+ * Opens the system browser to the IdP's login page (oauth.ts's PKCE + loopback flow)
+ * and waits for it — the password is entered there, never in this app. See auth.ts's
+ * doc comment for why this replaced the earlier email+password-direct-to-this-app
+ * design.
+ */
 async function attemptLogin() {
   loginErrorEl.textContent = "";
-  const email = emailEl.value.trim();
-  const password = passwordEl.value;
-  if (!email || !password) {
-    loginErrorEl.textContent = "Enter both email and password.";
-    return;
-  }
   loginBtn.disabled = true;
+  loginBtn.textContent = "Waiting for browser…";
   try {
-    const result = await window.vnl.login(email, password);
+    const result = await window.vnl.login();
     if (result.ok) {
       await enterAppOrSetup();
     } else {
@@ -149,13 +147,11 @@ async function attemptLogin() {
     }
   } finally {
     loginBtn.disabled = false;
+    loginBtn.textContent = "Log in with browser";
   }
 }
 
-loginBtn.addEventListener("click", attemptLogin);
-passwordEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") attemptLogin();
-});
+loginBtn.addEventListener("click", () => void attemptLogin());
 
 logoutBtn.addEventListener("click", () => void doLogout());
 
@@ -370,8 +366,6 @@ async function enterObsidianCompanion(): Promise<void> {
 
 async function doLogout(): Promise<void> {
   await window.vnl.logout();
-  emailEl.value = "";
-  passwordEl.value = "";
   showLogin();
 }
 

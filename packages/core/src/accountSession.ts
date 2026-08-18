@@ -13,22 +13,31 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
  * it by convention alone, with no IPC channel or file hand-off step between the two
  * apps.
  *
- * Mirrors packages/desktop-app's auth.ts readSession/writeSession/clearSession shape
+ * Mirrors packages/desktop-app's auth.ts readTokens/writeTokens/clearTokens shape
  * (functions take an explicit path rather than hardcoding one internally, so callers
  * can point tests at a temp path instead of the real home directory) — this module
  * only adds accountSessionPath() as the one fixed, well-known location production
  * code should actually use.
  *
+ * Deliberately carries only a short-lived **access token**, never the refresh token —
+ * the refresh token stays in the desktop app's own safeStorage-encrypted, same-process
+ * token file (packages/desktop-app's auth.ts) and never touches this cross-app file. A
+ * leaked or forged copy of this file is bounded to the access token's TTL; the thing
+ * that actually matters long-term (the refresh token) is never exposed here.
+ *
  * This module only defines the shared shape and read/write helpers; it doesn't decide
  * *who* trusts the file. Today only the desktop app writes it (packages/desktop-app's
- * auth.ts calls these on login/logout, alongside its own per-app session.json used for
- * the login screen's own state). Making the Obsidian plugin read this and skip its own
- * license-key login is separate, not-yet-built follow-on work.
+ * auth.ts calls these on login/logout/refresh, alongside its own per-app token file).
+ * Making the Obsidian plugin read this and skip its own license-key login is separate,
+ * not-yet-built follow-on work (tracked as AIBRAIN-128) — that work should re-validate
+ * the access token against AIBRAIN-73's real endpoint (or its expiry) rather than
+ * trusting the file's mere presence, since presence alone proves nothing on its own.
  */
 export interface AccountSession {
-  email: string;
-  plan: string;
-  loggedInAt: string;
+  accessToken: string;
+  expiresAt: string;
+  email?: string;
+  plan?: string;
 }
 
 const ACCOUNT_SESSION_DIR_NAME = ".vault-neural-links";
