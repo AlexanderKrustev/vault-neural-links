@@ -263,7 +263,7 @@ searchInput.addEventListener("keydown", (e) => {
  * panels. Shared by the setup screen's first-time picker and by
  * enterAppOrSetup's silent auto-load of a previously-configured workspace.
  */
-async function loadAndShowFolder(folderPath: string, sourceType: SourceType): Promise<void> {
+async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opts: { persist?: boolean } = {}): Promise<void> {
   errorEl.textContent = "";
   currentFolderPath = folderPath;
   folderPathEl.textContent = `${folderPath}  (${sourceType === "obsidian" ? "Obsidian vault" : "OKF folder"})`;
@@ -272,6 +272,8 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType): Pr
 
   try {
     const result = await window.vnl.loadFolder(folderPath, sourceType);
+    if (opts.persist) await window.vnl.setWorkspace(folderPath, sourceType);
+
     summaryEl.innerHTML = "";
     summaryEl.appendChild(stat(result.noteCount, "notes"));
     summaryEl.appendChild(stat(result.edgeCount, "edges"));
@@ -292,8 +294,15 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType): Pr
     await refreshPrimed();
     showApp();
   } catch (err) {
-    errorEl.textContent = String(err && (err as Error).message ? (err as Error).message : err);
+    // Surface the failure on the setup screen, not #error inside #appScreen — appScreen is
+    // still display:none at this point on a silently-resumed workspace that no longer loads
+    // (folder moved/deleted/renamed), which used to leave the user stuck looking at a blank
+    // or stale screen with no way to recover. The setup screen is always reachable and its
+    // buttons let them pick a new source right away.
+    const message = String(err && (err as Error).message ? (err as Error).message : err);
     notesEl.innerHTML = "";
+    showSetup();
+    setupErrorEl.textContent = `Couldn't load "${folderPath}": ${message}`;
   }
 }
 
@@ -311,8 +320,11 @@ async function chooseSource(sourceType: SourceType): Promise<void> {
   setupErrorEl.textContent = "";
   const folderPath = await window.vnl.pickFolder();
   if (!folderPath) return;
-  await window.vnl.setWorkspace(folderPath, sourceType);
-  await loadAndShowFolder(folderPath, sourceType);
+  // Persist the workspace choice only once the load actually succeeds (inside
+  // loadAndShowFolder) — persisting it upfront meant a bad pick (wrong adapter for the
+  // folder, empty folder, etc.) got written to disk and then silently re-attempted and
+  // re-failed on every relaunch via enterAppOrSetup.
+  await loadAndShowFolder(folderPath, sourceType, { persist: true });
 }
 
 chooseOkfBtn.addEventListener("click", () => void chooseSource("okf"));
