@@ -37,8 +37,14 @@ interface Workspace {
   sourceType: SourceType;
 }
 
+interface SessionInfo {
+  email: string;
+  plan: string;
+  loggedInAt: string;
+}
+
 interface VnlApi {
-  getSession(): Promise<unknown | null>;
+  getSession(): Promise<SessionInfo | null>;
   login(email: string, password: string): Promise<LoginResult>;
   logout(): Promise<{ ok: boolean }>;
   getWorkspace(): Promise<Workspace | null>;
@@ -70,6 +76,11 @@ const chooseObsidianBtn = document.getElementById("chooseObsidianBtn")!;
 const setupErrorEl = document.getElementById("setupError")!;
 const switchSourceBtn = document.getElementById("switchSourceBtn")!;
 
+const obsidianScreen = document.getElementById("obsidianScreen")!;
+const obsidianAccountEmailEl = document.getElementById("obsidianAccountEmail")!;
+const obsidianSwitchSourceBtn = document.getElementById("obsidianSwitchSourceBtn")!;
+const obsidianLogoutBtn = document.getElementById("obsidianLogoutBtn")!;
+
 const folderPathEl = document.getElementById("folderPath")!;
 const summaryEl = document.getElementById("summary")!;
 const notesEl = document.getElementById("notes")!;
@@ -84,19 +95,40 @@ const primedListEl = document.getElementById("primedList")!;
 function showApp() {
   setupScreen.style.display = "none";
   loginScreen.style.display = "none";
+  obsidianScreen.style.display = "none";
   appScreen.style.display = "block";
 }
 
 function showLogin() {
   setupScreen.style.display = "none";
   loginScreen.style.display = "block";
+  obsidianScreen.style.display = "none";
   appScreen.style.display = "none";
 }
 
 function showSetup() {
   setupScreen.style.display = "block";
   loginScreen.style.display = "none";
+  obsidianScreen.style.display = "none";
   appScreen.style.display = "none";
+}
+
+/**
+ * The Obsidian companion screen — per the 2026-08-18 architecture decision
+ * (see vault note "Standalone Decoupled Product Direction - Open Question"),
+ * choosing "existing Obsidian vault" does NOT load a folder or show the
+ * graph/editor here. Notes and the graph stay in Obsidian via the plugin;
+ * this app is only account/subscription status + (later) plugin connection
+ * status and usage metrics.
+ */
+async function showObsidianCompanion(): Promise<void> {
+  setupScreen.style.display = "none";
+  loginScreen.style.display = "none";
+  appScreen.style.display = "none";
+  obsidianScreen.style.display = "block";
+
+  const session = await window.vnl.getSession();
+  obsidianAccountEmailEl.textContent = session?.email ?? "";
 }
 
 async function attemptLogin() {
@@ -125,12 +157,7 @@ passwordEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") attemptLogin();
 });
 
-logoutBtn.addEventListener("click", async () => {
-  await window.vnl.logout();
-  emailEl.value = "";
-  passwordEl.value = "";
-  showLogin();
-});
+logoutBtn.addEventListener("click", () => void doLogout());
 
 (async function initSession() {
   const session = await window.vnl.getSession();
@@ -309,10 +336,12 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opt
 /** After login (or on relaunch with an existing session): silently resume the last workspace, or send a first-time user to the setup screen. */
 async function enterAppOrSetup(): Promise<void> {
   const workspace = await window.vnl.getWorkspace();
-  if (workspace) {
-    await loadAndShowFolder(workspace.folderPath, workspace.sourceType);
-  } else {
+  if (!workspace) {
     showSetup();
+  } else if (workspace.sourceType === "obsidian") {
+    await showObsidianCompanion();
+  } else {
+    await loadAndShowFolder(workspace.folderPath, workspace.sourceType);
   }
 }
 
@@ -327,6 +356,27 @@ async function chooseSource(sourceType: SourceType): Promise<void> {
   await loadAndShowFolder(folderPath, sourceType, { persist: true });
 }
 
+/**
+ * "Existing Obsidian vault" never reads the vault folder from this app — see
+ * showObsidianCompanion's doc comment. There's no folder to persist, just the source
+ * type, so relaunch (enterAppOrSetup) knows to route straight back to the companion
+ * screen instead of the setup screen.
+ */
+async function enterObsidianCompanion(): Promise<void> {
+  setupErrorEl.textContent = "";
+  await window.vnl.setWorkspace("", "obsidian");
+  await showObsidianCompanion();
+}
+
+async function doLogout(): Promise<void> {
+  await window.vnl.logout();
+  emailEl.value = "";
+  passwordEl.value = "";
+  showLogin();
+}
+
 chooseOkfBtn.addEventListener("click", () => void chooseSource("okf"));
-chooseObsidianBtn.addEventListener("click", () => void chooseSource("obsidian"));
+chooseObsidianBtn.addEventListener("click", () => void enterObsidianCompanion());
 switchSourceBtn.addEventListener("click", () => showSetup());
+obsidianSwitchSourceBtn.addEventListener("click", () => showSetup());
+obsidianLogoutBtn.addEventListener("click", () => void doLogout());

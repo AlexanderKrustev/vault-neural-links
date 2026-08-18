@@ -56,6 +56,14 @@
       .source-option .badge { float: right; font-size: 10px; color: #9aa0a6; background: #14161a; border: 1px solid #2c3038; border-radius: 10px; padding: 2px 8px; }
       #switchSourceBtn { background: transparent; border: 1px solid #2c3038; margin-left: 8px; }
       #switchSourceBtn:hover { background: #1e2127; }
+
+      #obsidianScreen { display: none; max-width: 440px; margin: 60px auto; }
+      #obsidianScreen h1 { text-align: center; }
+      #obsidianScreen .sub { text-align: center; }
+      #obsidianScreen .card { background: #1e2127; border: 1px solid #2c3038; border-radius: 8px; padding: 14px 16px; margin-top: 16px; }
+      #obsidianScreen .card .title { font-size: 13px; font-weight: 600; color: #e6e6e6; }
+      #obsidianScreen .card .value { font-size: 12px; color: #9aa0a6; margin-top: 4px; }
+      #obsidianScreen .actions { display: flex; justify-content: center; gap: 8px; margin-top: 20px; }
     </style>
   </head>
   <body>
@@ -69,7 +77,7 @@
         </button>
         <button class="source-option" id="chooseObsidianBtn">
           <span class="title">Existing Obsidian vault</span>
-          <div class="desc">Point at a vault you already have — wikilinks and OKF-style links both work.</div>
+          <div class="desc">Keep using the Obsidian plugin for notes and the graph — this app just manages your account.</div>
         </button>
         <button class="source-option" disabled title="Coming in a later version">
           <span class="badge">Coming soon</span>
@@ -90,6 +98,27 @@
       <button id="loginBtn">Log in</button>
       <div id="loginError"></div>
       <div id="demoHint">Mock account for now — demo@vaultneurallinks.dev / demo1234. Swapped for a real subscription check once AIBRAIN-73 exists.</div>
+    </section>
+
+    <section id="obsidianScreen">
+      <h1>Vault Neural Links</h1>
+      <p class="sub">Notes and the graph stay in Obsidian — this app manages your account.</p>
+      <div class="card">
+        <div class="title">Account</div>
+        <div class="value" id="obsidianAccountEmail"></div>
+      </div>
+      <div class="card">
+        <div class="title">Obsidian plugin</div>
+        <div class="value" id="obsidianPluginStatus">Connection status coming soon.</div>
+      </div>
+      <div class="card">
+        <div class="title">Usage metrics</div>
+        <div class="value">Coming soon.</div>
+      </div>
+      <div class="actions">
+        <button id="obsidianSwitchSourceBtn">Switch source…</button>
+        <button id="obsidianLogoutBtn">Log out</button>
+      </div>
     </section>
 
     <section id="appScreen">
