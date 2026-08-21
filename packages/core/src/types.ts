@@ -56,6 +56,28 @@ export interface CompactionResult {
 export interface DecayConfig {
   /** half-life in days */
   halfLifeDays: number;
+  /**
+   * AIBRAIN-66 fast-follow: optional fast-decay window. For the first
+   * `fastWindowDays` after a touch, weight decays using `fastHalfLifeDays`
+   * instead of `halfLifeDays`, then continues at the normal `halfLifeDays`
+   * rate from whatever's left. Undefined (default) = no fast phase, pure
+   * single-half-life decay exactly as before this fast-follow — existing
+   * callers that don't set these two fields are unaffected.
+   *
+   * Why this exists: benchmark-reinforcement.mjs found a single fresh touch
+   * (usage-tier weight ~1) unconditionally outranked pure structural
+   * signal (~0.1-0.15 ceiling even at max importance) for days at a time,
+   * regardless of topical relevance — removing the reinforce_link tool
+   * narrowed who could trigger this but didn't change the ranking math
+   * itself. Wired into query.ts's liveWeight for the usage tier only: a
+   * lone touch now fades back toward the structural floor within ~48h
+   * unless reinforced again, while genuine repeated engagement over
+   * several days still accumulates (each new touch resets `lastTouched`,
+   * restarting the fast phase from the freshly-boosted baseStrength) and
+   * wins clearly.
+   */
+  fastWindowDays?: number;
+  fastHalfLifeDays?: number;
 }
 
 export const DEFAULT_DECAY_CONFIG: DecayConfig = {

@@ -103,12 +103,19 @@ async function makeZeroUsageDataDir() {
 }
 
 /**
- * Copies the zero-usage scratch dir, then appends a modest synthetic usage
- * history for one (origin, target) pair and compacts it into
- * link-weights.json. "Modest" deliberately, not maxed-out — one traversal
- * plus two explicit reinforce_link calls a few days apart, roughly what a
- * user who found this note genuinely useful a couple of times would
- * produce, not an artificial worst/best case.
+ * Copies the zero-usage scratch dir, then appends a synthetic usage history
+ * for one (origin, target) pair and compacts it into link-weights.json.
+ *
+ * AIBRAIN-66 fast-follow (2026-08-21, second pass): with the reinforce_link
+ * tool removed, one traversal + one auto-reinforce (AUTO_REINFORCE_BOOST)
+ * is now the realistic MAXIMUM a single retrieval-then-read event can
+ * produce — not "a user reinforced this a couple of times," which isn't
+ * achievable through any live path anymore. 2 touches total, deliberately
+ * below USAGE_ESTABLISHED_TOUCH_COUNT (3, query.ts) so this exercises the
+ * fast-decay window rather than accidentally landing on "established" and
+ * bypassing it — an earlier version of this scenario (1 traverse + 2
+ * explicit reinforce, boost 5 each — the pre-removal tool's old default)
+ * had exactly that bug: 3 touches silently skipped the fix entirely.
  */
 async function makeSimulatedReinforcementDataDir(zeroUsageDir, origin, target) {
   const dir = await mkdtemp(join(tmpdir(), "vnl-bench-reinforce-"));
@@ -118,9 +125,8 @@ async function makeSimulatedReinforcementDataDir(zeroUsageDir, origin, target) {
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
   const events = [
-    { offsetDays: 9, type: "traverse", weight_delta: 1, trigger: "read" },
-    { offsetDays: 6, type: "reinforce", weight_delta: 5, trigger: "explicit" },
-    { offsetDays: 2, type: "reinforce", weight_delta: 5, trigger: "explicit" },
+    { offsetDays: 6, type: "traverse", weight_delta: 1, trigger: "read" },
+    { offsetDays: 6, type: "reinforce", weight_delta: 1, trigger: "auto-retrieval" },
   ];
   for (const e of events) {
     await appendEvent(dir, instanceId, {
@@ -159,6 +165,20 @@ async function main() {
       simBuffer.touch(q.target);
       const simulatedReinforcement = await activate(simDir, q.origin, ENERGY, undefined, vaultPath, simBuffer);
 
+      // AIBRAIN-66 fast-follow: isolates reinforcement's own effect from
+      // priming's. The three methods above all call sessionBuffer.touch(q.target)
+      // before activating — AIBRAIN-31/67's original methodology, simulating
+      // "you already read the target earlier this session" — but priming's
+      // bonus (priming.ts's primingBonus) is a flat, UNDECAYED bonus for
+      // anything touched this session, independent of reinforcement/decay
+      // entirely. For most rows that's the right call (measures the whole
+      // engine as designed) — but for the distractor row specifically it's a
+      // confound: priming alone can rank it #1 regardless of any
+      // reinforcement fix, since priming was never touched by that fix. No
+      // session touch here at all, so this column isolates reinforcement
+      // (and the decay fix) on its own.
+      const simulatedReinforcementNoPriming = await activate(simDir, q.origin, ENERGY, undefined, vaultPath, undefined);
+
       rows.push({
         label: q.label,
         origin: q.origin,
@@ -167,11 +187,12 @@ async function main() {
           asIs: rankOf(asIs, q.target),
           zeroUsage: rankOf(zeroUsage, q.target),
           simulatedReinforcement: rankOf(simulatedReinforcement, q.target),
+          simulatedReinforcementNoPriming: rankOf(simulatedReinforcementNoPriming, q.target),
         },
       });
     }
 
-    const methods = ["asIs", "zeroUsage", "simulatedReinforcement"];
+    const methods = ["asIs", "zeroUsage", "simulatedReinforcement", "simulatedReinforcementNoPriming"];
     const summaries = methods.map((m) => summarize(m, rows));
 
     console.log(JSON.stringify({ queryCount: rows.length, summaries, rows }, null, 2));

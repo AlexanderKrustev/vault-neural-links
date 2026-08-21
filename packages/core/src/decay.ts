@@ -11,8 +11,23 @@ export function decayWeight(
   config: DecayConfig = DEFAULT_DECAY_CONFIG,
 ): number {
   if (daysSinceLastTouched <= 0) return weight;
-  const lambda = Math.LN2 / config.halfLifeDays;
-  return weight * Math.exp(-lambda * daysSinceLastTouched);
+
+  const { halfLifeDays, fastWindowDays, fastHalfLifeDays } = config;
+  if (!fastWindowDays || !fastHalfLifeDays || fastWindowDays <= 0) {
+    const lambda = Math.LN2 / halfLifeDays;
+    return weight * Math.exp(-lambda * daysSinceLastTouched);
+  }
+
+  const fastLambda = Math.LN2 / fastHalfLifeDays;
+  if (daysSinceLastTouched <= fastWindowDays) {
+    return weight * Math.exp(-fastLambda * daysSinceLastTouched);
+  }
+
+  // Past the fast window: continue from wherever the fast phase left off,
+  // at the normal (slower) rate.
+  const weightAtWindowEnd = weight * Math.exp(-fastLambda * fastWindowDays);
+  const normalLambda = Math.LN2 / halfLifeDays;
+  return weightAtWindowEnd * Math.exp(-normalLambda * (daysSinceLastTouched - fastWindowDays));
 }
 
 

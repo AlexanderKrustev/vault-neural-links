@@ -17,6 +17,18 @@ import { primingBonus, type SessionBuffer } from "./priming.js";
 import { readSupersession } from "./relations.js";
 import { loadStructuralIndex } from "./structuralLinks.js";
 
+// AIBRAIN-66 fast-follow: see DecayConfig's doc comment in types.ts for the
+// full rationale. Tuned empirically against benchmark-reinforcement.mjs
+// (does a lone recent touch stop dominating the distractor case) and
+// benchmark-baselines.mjs / eval-retrieval.mjs (does it regress the main
+// engine-vs-baseline numbers) together, not picked blind.
+const USAGE_FAST_DECAY_WINDOW_DAYS = 2;
+const USAGE_FAST_DECAY_HALF_LIFE_DAYS = 0.5;
+// An edge needs this many total touches (traverse + reinforce, combined)
+// before it's treated as "established" and exempted from the fast-decay
+// window above.
+const USAGE_ESTABLISHED_TOUCH_COUNT = 3;
+
 async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null> {
   try {
     const content = await readFile(join(vaultDataDir, "link-weights.json"), "utf8");
@@ -64,7 +76,24 @@ async function liveWeight(
   // long-term tier: once promoted, it resists the recent tier's decay
   // entirely rather than just decaying more slowly.
   const consolidated = layers.consolidation ? record.consolidatedScore : 0;
-  return decayWeight(record.baseStrength, daysSince(record.lastTouched, now), { halfLifeDays }) + consolidated;
+  // Fast-decay only applies to edges that haven't proven themselves yet
+  // (fewer than USAGE_ESTABLISHED_TOUCH_COUNT touches total) — an edge with
+  // real repeated engagement across several sessions decays at the normal
+  // rate, same as always. Gating on touch count rather than applying the
+  // fast phase unconditionally to every edge matters: unconditional would
+  // also crush the eventual decayed weight of old, well-established edges
+  // (confirmed against pipeline.test.ts — an edge touched once 30 days ago
+  // and never since SHOULD fade hard, but one touched repeatedly shouldn't
+  // pay that same penalty just because 30 days have passed since).
+  const established = record.traverseCount + record.reinforceCount >= USAGE_ESTABLISHED_TOUCH_COUNT;
+  return (
+    decayWeight(record.baseStrength, daysSince(record.lastTouched, now), {
+      halfLifeDays,
+      ...(established
+        ? {}
+        : { fastWindowDays: USAGE_FAST_DECAY_WINDOW_DAYS, fastHalfLifeDays: USAGE_FAST_DECAY_HALF_LIFE_DAYS }),
+    }) + consolidated
+  );
 }
 
 /**

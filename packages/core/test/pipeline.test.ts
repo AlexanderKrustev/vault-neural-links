@@ -85,7 +85,11 @@ describe("logger + compactor + query pipeline", () => {
     const weight = await getEdgeWeight(dataDir, "A", "B");
     expect(weight).toBeGreaterThan(0);
     expect(weight).toBeLessThan(10);
-    expect(weight).toBeCloseTo(5, 0);
+    // Not ~5 (plain one-half-life decay) — this edge has only 1 touch, so
+    // it's still "unestablished" and goes through USAGE_FAST_DECAY_WINDOW_DAYS's
+    // steeper initial decay before continuing at the normal 30-day half-life
+    // (see query.ts's liveWeight doc comment, AIBRAIN-66 fast-follow).
+    expect(weight).toBeCloseTo(0.3272794128563236, 5);
   });
 
   it("preserves edges from a prior compaction when a later compaction only touches unrelated edges", async () => {
@@ -322,7 +326,9 @@ describe("per-note-type decay tau at query time", () => {
     const withoutType = await getEdgeWeight(dataDir, "A", "Hub");
     const withType = await getEdgeWeight(dataDir, "A", "Hub", vaultPath);
 
-    expect(withoutType).toBeCloseTo(5, 0); // default 30-day half-life: one half-life elapsed
+    // Not ~5 — single-touch edge, still "unestablished", goes through the
+    // fast-decay window first (see the other test's comment for detail).
+    expect(withoutType).toBeCloseTo(0.3272794130313644, 5);
     expect(withType).toBeGreaterThan(withoutType!); // moc tau (90d) decays slower over the same 30 days
   });
 });
