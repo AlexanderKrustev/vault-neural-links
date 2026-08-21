@@ -91,8 +91,15 @@ ribbon icon or the "Open Neural Graph" command.
 | `get_weighted_neighbors` | Get a note's most-used related notes |
 | `get_edge_weight` | Get the current weight between two specific notes |
 | `log_traversal` | Record that a session followed a link from one note to another |
-| `reinforce_link` | Explicitly boost a link's weight when it was genuinely useful |
 | `compact_weights` | Force-fold pending events into the weights file immediately |
+
+Reinforcement (boosting a link beyond ordinary read/traversal tracking) is
+automatic, not a tool call: reading a note that surfaced in the session's
+most recent `activate`/`get_weighted_neighbors` result reinforces that link
+on its own. An earlier explicit `reinforce_link` tool was removed — it had
+zero real invocations across months of production usage and, when tested,
+turned out to be miscalibrated badly enough to override topical relevance
+entirely.
 
 ## Packages
 

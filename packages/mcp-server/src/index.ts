@@ -13,7 +13,6 @@ import {
   logTraversalTool,
   makeToolContext,
   readNoteTool,
-  reinforceLinkTool,
   searchNotesTool,
   updateNoteTool,
 } from "./tools.js";
@@ -53,7 +52,8 @@ server.registerTool(activateTool.name, activateTool.config, activateTool.handler
 server.registerTool(ablationDiffTool.name, ablationDiffTool.config, ablationDiffTool.handler(ctx));
 server.registerTool(getEdgeWeightTool.name, getEdgeWeightTool.config, getEdgeWeightTool.handler(ctx));
 server.registerTool(logTraversalTool.name, logTraversalTool.config, logTraversalTool.handler(ctx));
-server.registerTool(reinforceLinkTool.name, reinforceLinkTool.config, reinforceLinkTool.handler(ctx));
+// reinforce_link removed (AIBRAIN-66/AIBRAIN-69 follow-up) — see tools.ts's
+// comment at the former reinforceLinkTool location for why.
 server.registerTool(compactWeightsTool.name, compactWeightsTool.config, compactWeightsTool.handler(ctx));
 server.registerTool(createNoteTool.name, createNoteTool.config, createNoteTool.handler(ctx));
 server.registerTool(updateNoteTool.name, updateNoteTool.config, updateNoteTool.handler(ctx));

@@ -14,7 +14,6 @@ import {
   logTraversalTool,
   makeToolContext,
   readNoteTool,
-  reinforceLinkTool,
   searchNotesTool,
   updateNoteTool,
   type ToolContext,
@@ -47,20 +46,6 @@ describe("mcp-server tools", () => {
     expect(parseResult(result)).toEqual({ noteA: "A", noteB: "B", weight: null });
   });
 
-  it("reinforce_link followed by compact_weights surfaces a non-zero edge weight", async () => {
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
-    const compactResult = await compactWeightsTool.handler(ctx)({});
-    expect(parseResult(compactResult).edgeCount).toBe(1);
-
-    const neighbors = parseResult(await getWeightedNeighborsTool.handler(ctx)({ note: "A" }));
-    expect(neighbors).toHaveLength(1);
-    expect(neighbors[0].path).toBe("B");
-    expect(neighbors[0].weight).toBeGreaterThan(0);
-
-    const edge = parseResult(await getEdgeWeightTool.handler(ctx)({ noteA: "A", noteB: "B" }));
-    expect(edge.weight).toBeGreaterThan(0);
-  });
-
   it("log_traversal followed by compact_weights surfaces a non-zero edge weight", async () => {
     await logTraversalTool.handler(ctx)({ from: "A", to: "B" });
     await logTraversalTool.handler(ctx)({ from: "A", to: "C" });
@@ -73,8 +58,8 @@ describe("mcp-server tools", () => {
   });
 
   it("get_weighted_neighbors respects topK", async () => {
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B" });
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "C" });
+    await ctx.client.reinforce("A", "B");
+    await ctx.client.reinforce("A", "C");
     await compactWeightsTool.handler(ctx)({});
 
     const neighbors = parseResult(await getWeightedNeighborsTool.handler(ctx)({ note: "A", topK: 1 }));
@@ -113,8 +98,8 @@ describe("mcp-server tools", () => {
   });
 
   it("activate surfaces a two-hop neighbor not directly linked to the origin, with a populated trace", async () => {
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
-    await reinforceLinkTool.handler(ctx)({ from: "B", to: "C", boost: 10 });
+    await ctx.client.reinforce("A", "B", 10);
+    await ctx.client.reinforce("B", "C", 10);
     await compactWeightsTool.handler(ctx)({});
 
     // minK: 1 so this only ever activation-run once — the two-hop path here
@@ -133,8 +118,8 @@ describe("mcp-server tools", () => {
   });
 
   it("activate respects maxHops override", async () => {
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
-    await reinforceLinkTool.handler(ctx)({ from: "B", to: "C", boost: 10 });
+    await ctx.client.reinforce("A", "B", 10);
+    await ctx.client.reinforce("B", "C", 10);
     await compactWeightsTool.handler(ctx)({});
 
     const { activated } = parseResult(await activateTool.handler(ctx)({ note: "A", maxHops: 1 }));
@@ -142,7 +127,7 @@ describe("mcp-server tools", () => {
   });
 
   it("activate reports which fallback tier served the result", async () => {
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
+    await ctx.client.reinforce("A", "B", 10);
     await compactWeightsTool.handler(ctx)({});
 
     const { tier } = parseResult(await activateTool.handler(ctx)({ note: "A" }));
@@ -159,7 +144,7 @@ describe("mcp-server tools", () => {
     const broadcast = vi.fn();
     ctx.activationSocket = { port: 0, broadcast, close: async () => {} };
 
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
+    await ctx.client.reinforce("A", "B", 10);
     await compactWeightsTool.handler(ctx)({});
     broadcast.mockClear(); // isolate activate's own broadcasts from reinforce/compact's
 
@@ -169,8 +154,8 @@ describe("mcp-server tools", () => {
   });
 
   it("ablation_diff shows a promoted edge losing energy when consolidation is disabled", async () => {
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 10 });
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "C", boost: 10 });
+    await ctx.client.reinforce("A", "B", 10);
+    await ctx.client.reinforce("A", "C", 10);
     await compactWeightsTool.handler(ctx)({});
 
     const { readFile, writeFile } = await import("node:fs/promises");
@@ -201,12 +186,16 @@ describe("mcp-server tools", () => {
     expect(result.diff).toContainEqual(expect.objectContaining({ path: "B", status: "removed" }));
   });
 
-  it("log_traversal and reinforce_link each broadcast an edge_traversed event live", async () => {
+  it("log_traversal and client.reinforce each broadcast an edge_traversed event live", async () => {
     const broadcast = vi.fn();
     ctx.activationSocket = { port: 0, broadcast, close: async () => {} };
 
     await logTraversalTool.handler(ctx)({ from: "A", to: "B" });
-    await reinforceLinkTool.handler(ctx)({ from: "A", to: "B", boost: 3 });
+    // Exercises the same client.reinforce() call shape the (now sole)
+    // production caller uses — auto-reinforce, tools.ts's read_note handler
+    // — broadcast wiring included, rather than the deleted reinforce_link
+    // tool's wrapper.
+    await ctx.client.reinforce("A", "B", 3, (event) => ctx.activationSocket?.broadcast(event));
 
     expect(broadcast).toHaveBeenCalledTimes(2);
     expect(broadcast.mock.calls[0][0]).toMatchObject({ type: "edge_traversed", from: "A", to: "B", energy: 1 });

@@ -142,14 +142,21 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
   }
   if (reinforceExplicitCount === 0 && reinforceAutoCount === 0 && traverseCount > 0) {
     gaps.push(
-      "reinforce_link was never called across the logged history and no automatic reinforcement has fired " +
-        "either — traversal auto-logging (read_note) is carrying all persisted usage weight in practice.",
+      "No reinforcement signal recorded (explicit or automatic) — traversal auto-logging (read_note) is " +
+        "carrying all persisted usage weight in practice.",
     );
   } else if (reinforceExplicitCount === 0 && reinforceAutoCount > 0) {
+    // AIBRAIN-66/AIBRAIN-69 follow-up (2026-08-21): this is expected now,
+    // not a gap to flag as actionable — the explicit reinforce_link MCP
+    // tool was removed (zero real invocations ever, per the 2026-08-16
+    // decision-delegation audit; also found miscalibrated, see
+    // benchmark-reinforcement.mjs), so automatic retrieval-then-read
+    // correlation (AIBRAIN-71) is now the *only* live reinforcement path
+    // going forward. `explicit` counts above 0 only ever come from
+    // historical data logged before the tool's removal.
     gaps.push(
-      `reinforce_link (the explicit call) has never been used, but ${reinforceAutoCount} edge(s) were auto-` +
-        "reinforced from retrieval-then-read correlation (AIBRAIN-71) — the automatic mechanism is carrying " +
-        "the reinforcement signal in practice, not the explicit tool call.",
+      `All reinforcement signal so far is automatic (${reinforceAutoCount} edge(s), via retrieval-then-read ` +
+        "correlation, AIBRAIN-71) — expected, since the explicit reinforce_link tool was removed.",
     );
   }
   if (activateTierCounts.keyword === 0 && activateTierCounts.recency === 0 && activateTierCounts.activation > 0) {

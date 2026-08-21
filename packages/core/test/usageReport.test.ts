@@ -104,7 +104,7 @@ describe("computeUsageReport", () => {
 
     const report = await computeUsageReport(dataDir);
 
-    expect(report.gaps.some((g) => g.includes("reinforce_link was never called across the logged history and no automatic"))).toBe(true);
+    expect(report.gaps.some((g) => g.includes("No reinforcement signal recorded"))).toBe(true);
   });
 
   it("distinguishes auto-retrieval reinforcement from explicit and adjusts the gap message", async () => {
@@ -116,7 +116,7 @@ describe("computeUsageReport", () => {
     const report = await computeUsageReport(dataDir);
 
     expect(report.mechanismCounts.reinforce).toEqual({ explicit: 0, autoRetrieval: 1 });
-    expect(report.gaps.some((g) => g.includes("has never been used, but 1 edge(s) were auto-reinforced"))).toBe(true);
+    expect(report.gaps.some((g) => g.includes("All reinforcement signal so far is automatic (1 edge(s)"))).toBe(true);
     expect(report.gaps.some((g) => g.includes("no automatic reinforcement has fired either"))).toBe(false);
   });
 

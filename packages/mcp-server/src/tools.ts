@@ -4,7 +4,6 @@ import {
   appendUnderHeading,
   AUTO_REINFORCE_BOOST,
   autoLinkScan,
-  DEFAULT_REINFORCE_BOOST,
   DEFAULT_SPREADING_ACTIVATION_CONFIG,
   getEdgeWeight,
   initInstance,
@@ -36,7 +35,7 @@ export interface ToolContext {
    * retrieve them (AIBRAIN-71). If one of these is then actually opened via
    * read_note, that's a deterministic "this retrieval result got acted on"
    * signal, so it's auto-reinforced — no LLM has to notice and decide to
-   * call reinforce_link. Overwritten wholesale on each new retrieval call
+   * call a reinforcement tool. Overwritten wholesale on each new retrieval call
    * (last retrieval wins) and consumed (deleted) on credit, same
    * process-lifetime-only scope as lastReadNote.
    */
@@ -279,31 +278,19 @@ export const logTraversalTool = {
   },
 };
 
-export const reinforceLinkTool = {
-  name: "reinforce_link",
-  config: {
-    title: "Reinforce link",
-    description:
-      "Explicitly signals that a link between two notes was useful for the current task, boosting its " +
-      "weight beyond ordinary traversal-on-read tracking. As of AIBRAIN-71, reading a note that surfaced in " +
-      "the same session's most recent activate()/get_weighted_neighbors() result already triggers this " +
-      "automatically at a smaller boost — call this tool only when you want to signal something stronger " +
-      "than that automatic signal, or reinforce a link the automatic mechanism wouldn't have caught (e.g. " +
-      "it materially helped but didn't come from a retrieval call this session).",
-    inputSchema: {
-      from: z.string().describe("Vault-relative note path, without .md extension"),
-      to: z.string().describe("Vault-relative note path, without .md extension"),
-      // AIBRAIN-66 fast-follow: default was stale here (said 5, core's
-      // DEFAULT_REINFORCE_BOOST is now 1.5) — see that constant's doc
-      // comment in packages/core/src/index.ts for why it was lowered.
-      boost: z.number().positive().optional().describe("Reinforcement strength (default 1.5)"),
-    },
-  },
-  handler: (ctx: ToolContext) => async ({ from, to, boost }: { from: string; to: string; boost?: number }) => {
-    await ctx.client.reinforce(from, to, boost, (event) => ctx.activationSocket?.broadcast(event), "explicit");
-    return textResult({ reinforced: true, from, to, boost: boost ?? DEFAULT_REINFORCE_BOOST });
-  },
-};
+// reinforce_link tool removed (AIBRAIN-66/AIBRAIN-69 follow-up, 2026-08-21):
+// per the MCP Tool Decision-Delegation Audit (2026-08-16), it had zero real
+// invocations ever across months of production usage — the whole tool
+// required an LLM to notice, mid-turn, that a link "materially helped" and
+// decide to call it, with no deterministic trigger and no fallback if it
+// didn't. Investigating a calibration fix (packages/core/scripts/
+// benchmark-reinforcement.mjs) additionally found it was miscalibrated
+// badly enough that two calls could force any note to rank #1 regardless
+// of topical relevance. Deterministic auto-reinforcement (AUTO_REINFORCE_BOOST,
+// see pendingRetrievals below) already covers the case that mattered —
+// reading a note that was actually surfaced by a retrieval call this
+// session — without needing an LLM decision at all. client.reinforce()
+// itself stays in core, still used internally by that auto-reinforce path.
 
 export const compactWeightsTool = {
   name: "compact_weights",
