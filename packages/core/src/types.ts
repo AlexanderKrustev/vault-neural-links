@@ -202,6 +202,15 @@ export interface StructuralFallbackConfig {
 }
 
 export const DEFAULT_STRUCTURAL_FALLBACK_CONFIG: StructuralFallbackConfig = {
+  // AIBRAIN-66 fast-follow: tried raising this to 0.5 to give a highly
+  // important structural-only neighbor more room to compete with a single
+  // ordinary usage touch — reverted (packages/core/scripts/benchmark-
+  // baselines.mjs regressed: found 16/18 -> 15/18, mean rank 3.25 -> 4.6)
+  // and it did nothing for the actual problem it was meant to help
+  // (benchmark-reinforcement.mjs's distractor still ranked #1 once
+  // reinforced). The real fix needs importance to be able to dampen usage
+  // weight for topically-irrelevant edges, not just lift this floor —
+  // scoped as separate follow-on work, not a constant to keep guessing at.
   floorWeight: 0.1,
 };
 

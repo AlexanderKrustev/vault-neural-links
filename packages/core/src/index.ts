@@ -57,7 +57,15 @@ export * from "./notes.js";
 export * from "./autolink.js";
 export * from "./changelog.js";
 
-const DEFAULT_REINFORCE_BOOST = 5;
+// AIBRAIN-66 fast-follow: lowered from 5. Measured via
+// packages/core/scripts/benchmark-reinforcement.mjs: two default-boost
+// reinforce_link calls on one edge were enough to rank that note #1 for
+// every ground-truth query tried, including a deliberate topically-
+// irrelevant distractor. This reduction alone does not fix that (the real
+// cause is deeper — see DEFAULT_STRUCTURAL_FALLBACK_CONFIG's doc comment in
+// types.ts) but is a real, tested, net-positive reduction in how far a
+// couple of clicks can distort ranking on its own.
+const DEFAULT_REINFORCE_BOOST = 1.5;
 const DEFAULT_ACTIVATION_ENERGY = 10;
 
 /**
@@ -68,8 +76,11 @@ const DEFAULT_ACTIVATION_ENERGY = 10;
  * reinforce_link call's full boost (DEFAULT_REINFORCE_BOOST). Unlike
  * reinforce_link, this fires automatically and needs no LLM to notice and
  * decide to call a tool about it.
+ *
+ * AIBRAIN-66 fast-follow: lowered from 3 alongside DEFAULT_REINFORCE_BOOST's
+ * drop from 5 to 1.5, same reason — see that constant's doc comment.
  */
-export const AUTO_REINFORCE_BOOST = 3;
+export const AUTO_REINFORCE_BOOST = 1;
 
 export interface VaultLinkClient {
   /**
