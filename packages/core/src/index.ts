@@ -65,7 +65,11 @@ export * from "./changelog.js";
 // cause is deeper — see DEFAULT_STRUCTURAL_FALLBACK_CONFIG's doc comment in
 // types.ts) but is a real, tested, net-positive reduction in how far a
 // couple of clicks can distort ranking on its own.
-const DEFAULT_REINFORCE_BOOST = 1.5;
+// Exported (not just a private const) so callers that surface the default
+// in their own docs/return values — e.g. mcp-server's reinforce_link tool —
+// have one source of truth instead of a hand-copied number that can go
+// stale (as it did here after this constant moved from 5 to 1.5).
+export const DEFAULT_REINFORCE_BOOST = 1.5;
 const DEFAULT_ACTIVATION_ENERGY = 10;
 
 /**

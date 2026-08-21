@@ -4,6 +4,7 @@ import {
   appendUnderHeading,
   AUTO_REINFORCE_BOOST,
   autoLinkScan,
+  DEFAULT_REINFORCE_BOOST,
   DEFAULT_SPREADING_ACTIVATION_CONFIG,
   getEdgeWeight,
   initInstance,
@@ -292,12 +293,15 @@ export const reinforceLinkTool = {
     inputSchema: {
       from: z.string().describe("Vault-relative note path, without .md extension"),
       to: z.string().describe("Vault-relative note path, without .md extension"),
-      boost: z.number().positive().optional().describe("Reinforcement strength (default 5)"),
+      // AIBRAIN-66 fast-follow: default was stale here (said 5, core's
+      // DEFAULT_REINFORCE_BOOST is now 1.5) — see that constant's doc
+      // comment in packages/core/src/index.ts for why it was lowered.
+      boost: z.number().positive().optional().describe("Reinforcement strength (default 1.5)"),
     },
   },
   handler: (ctx: ToolContext) => async ({ from, to, boost }: { from: string; to: string; boost?: number }) => {
     await ctx.client.reinforce(from, to, boost, (event) => ctx.activationSocket?.broadcast(event), "explicit");
-    return textResult({ reinforced: true, from, to, boost: boost ?? 5 });
+    return textResult({ reinforced: true, from, to, boost: boost ?? DEFAULT_REINFORCE_BOOST });
   },
 };
 
