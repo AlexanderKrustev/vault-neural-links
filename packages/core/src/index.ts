@@ -48,6 +48,7 @@ export {
   readAccountSession,
   writeAccountSession,
   clearAccountSession,
+  isAccountSessionActive,
   type AccountSession,
 } from "./accountSession.js";
 export { computeUsageReport } from "./usageReport.js";

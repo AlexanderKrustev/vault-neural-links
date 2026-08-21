@@ -13,6 +13,17 @@ export class VaultNeuralLinksSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
+    // AIBRAIN-128: cross-app auth hand-off status. Shows the cached state immediately
+    // (set at plugin load), then re-reads the session file in the background — it's a
+    // cheap local file read, not a network call, and the desktop app rewrites it on
+    // every silent token refresh while it's open and logged in.
+    const accountStatus = new Setting(containerEl)
+      .setName("Desktop app account")
+      .setDesc(this.describeAccountAuth());
+    void this.plugin.refreshAccountAuth().then((state) => {
+      accountStatus.setDesc(this.describeAccountAuth(state));
+    });
+
     new Setting(containerEl)
       .setName("Minimum edge weight")
       .setDesc(
@@ -91,5 +102,14 @@ export class VaultNeuralLinksSettingTab extends PluginSettingTab {
             this.plugin.refreshGraphViews();
           }),
       );
+  }
+
+  /** Human-readable summary of the AIBRAIN-128 cross-app auth state, for the settings tab. */
+  private describeAccountAuth(state = this.plugin.accountAuth): string {
+    if (state.source === "desktop-app") {
+      const who = state.session.email ?? "an account";
+      return `Connected to the desktop app — logged in as ${who}.`;
+    }
+    return "Not connected to the desktop app. Log in there (or via a vault opened through it) to share your account session with this plugin.";
   }
 }

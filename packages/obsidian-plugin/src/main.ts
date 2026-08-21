@@ -3,13 +3,17 @@ import { VaultNeuralLinksSettingTab } from "./SettingTab.js";
 import { DEFAULT_SETTINGS, type VaultNeuralLinksSettings } from "./settings.js";
 import { NEURAL_GRAPH_VIEW_TYPE, NeuralGraphView } from "./view/NeuralGraphView.js";
 import { NightlyScheduler } from "./NightlyScheduler.js";
+import { getAccountAuthState, type AccountAuthState } from "./accountAuth.js";
 
 export default class VaultNeuralLinksPlugin extends Plugin {
   settings: VaultNeuralLinksSettings = DEFAULT_SETTINGS;
+  /** Cross-app auth hand-off state (AIBRAIN-128) — refreshed via refreshAccountAuth(). */
+  accountAuth: AccountAuthState = { source: "none" };
   private nightlyScheduler: NightlyScheduler | null = null;
 
   async onload(): Promise<void> {
     this.settings = { ...DEFAULT_SETTINGS, ...(await this.loadData()) };
+    this.accountAuth = await getAccountAuthState();
 
     this.registerView(NEURAL_GRAPH_VIEW_TYPE, (leaf: WorkspaceLeaf) => new NeuralGraphView(leaf, this));
     this.addSettingTab(new VaultNeuralLinksSettingTab(this.app, this));
@@ -41,6 +45,17 @@ export default class VaultNeuralLinksPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /**
+   * Re-reads the cross-app account session (AIBRAIN-128) and returns the fresh state.
+   * The desktop app rewrites its session file on every silent token refresh while it's
+   * open and logged in, so this is a cheap file read, not a network call — safe to call
+   * whenever current status needs to be shown (e.g. each time the settings tab opens).
+   */
+  async refreshAccountAuth(): Promise<AccountAuthState> {
+    this.accountAuth = await getAccountAuthState();
+    return this.accountAuth;
   }
 
   /** Re-applies current settings to every open Neural Graph view without waiting for a data change. */

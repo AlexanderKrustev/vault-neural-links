@@ -64,3 +64,18 @@ export async function writeAccountSession(path: string, session: AccountSession)
 export async function clearAccountSession(path: string): Promise<void> {
   await rm(path, { force: true });
 }
+
+/**
+ * Whether a session read from accountSessionPath() should be trusted as "the desktop
+ * app is currently logged in" — i.e. its access token hasn't outlived `expiresAt`.
+ *
+ * There's no refresh token in this file (by design, see the module doc comment above),
+ * so a caller (the Obsidian plugin, per AIBRAIN-128) must never attempt to refresh an
+ * expired session itself — it can only treat expired-and-not-yet-rewritten exactly like
+ * absent, and fall back to whatever its own standalone auth is. The desktop app keeps
+ * this file fresh on its own by rewriting it on every silent token refresh while it's
+ * open and logged in.
+ */
+export function isAccountSessionActive(session: AccountSession | null, now: Date = new Date()): session is AccountSession {
+  return session !== null && new Date(session.expiresAt).getTime() > now.getTime();
+}

@@ -10,7 +10,9 @@ const context = await esbuild.context({
   // at runtime (not just for types) — its compiled dist/ output (tsup) strips
   // the "node:" prefix off built-in imports, so those bare specifiers need
   // externalizing too, alongside the "node:"-prefixed ones already here.
-  external: ["obsidian", "electron", "node:fs", "node:path", "fs", "fs/promises", "path", "crypto"],
+  // accountAuth.ts (AIBRAIN-128) pulls in core's accountSession.ts, which also
+  // imports node:os — "os"/"node:os" added here for the same reason.
+  external: ["obsidian", "electron", "node:fs", "node:path", "node:os", "fs", "fs/promises", "path", "os", "crypto"],
   format: "cjs",
   target: "es2022",
   platform: "browser",

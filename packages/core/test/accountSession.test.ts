@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { accountSessionPath, clearAccountSession, readAccountSession, writeAccountSession } from "../src/accountSession.js";
+import {
+  accountSessionPath,
+  clearAccountSession,
+  isAccountSessionActive,
+  readAccountSession,
+  writeAccountSession,
+} from "../src/accountSession.js";
 
 let dir: string;
 let path: string;
@@ -49,5 +55,28 @@ describe("clearAccountSession", () => {
 
   it("is a no-op when no session file exists", async () => {
     await expect(clearAccountSession(path)).resolves.not.toThrow();
+  });
+});
+
+describe("isAccountSessionActive", () => {
+  const now = new Date("2026-08-21T12:00:00.000Z");
+
+  it("is false for a null session", () => {
+    expect(isAccountSessionActive(null, now)).toBe(false);
+  });
+
+  it("is true when expiresAt is in the future", () => {
+    const session = { accessToken: "tok", expiresAt: "2026-08-21T12:05:00.000Z" };
+    expect(isAccountSessionActive(session, now)).toBe(true);
+  });
+
+  it("is false when expiresAt has already passed", () => {
+    const session = { accessToken: "tok", expiresAt: "2026-08-21T11:55:00.000Z" };
+    expect(isAccountSessionActive(session, now)).toBe(false);
+  });
+
+  it("is false when expiresAt equals now exactly (not treated as still-active)", () => {
+    const session = { accessToken: "tok", expiresAt: now.toISOString() };
+    expect(isAccountSessionActive(session, now)).toBe(false);
   });
 });
