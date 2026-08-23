@@ -37,16 +37,38 @@ export interface SourceAdapter {
 }
 
 /** Reference implementation: Obsidian's markdown files + `[[wikilinks]]`. */
+const READ_CONCURRENCY = 64;
+
+/**
+ * Reads notes in bounded-concurrency batches instead of one at a time.
+ * At real vault scale (hundreds of notes) a plain sequential
+ * `for (path of paths) await readNote(...)` loop is invisible; at
+ * synthetic at-scale corpora (hundreds of thousands of notes, AIBRAIN-118)
+ * it turns into tens of minutes of pure per-file I/O round-trip latency
+ * with the CPU sitting idle the whole time — confirmed against a
+ * 300k-note synthetic corpus, where the old sequential version hadn't
+ * finished after 30 minutes. Batches instead of a single unbounded
+ * `Promise.all` over every path, so this doesn't try to hold 300k+ file
+ * descriptors open at once.
+ */
+async function readNodesInBatches(rootPath: string, paths: string[]): Promise<SourceNode[]> {
+  const nodes: SourceNode[] = [];
+  for (let i = 0; i < paths.length; i += READ_CONCURRENCY) {
+    const batch = paths.slice(i, i + READ_CONCURRENCY);
+    const notes = await Promise.all(batch.map((path) => readNote(rootPath, path)));
+    for (let j = 0; j < notes.length; j++) {
+      const note = notes[j];
+      if (note) nodes.push({ id: batch[j], body: note.body });
+    }
+  }
+  return nodes;
+}
+
 export function createObsidianAdapter(vaultPath: string): SourceAdapter {
   return {
     async listNodes(): Promise<SourceNode[]> {
       const paths = await listNotes(vaultPath);
-      const nodes: SourceNode[] = [];
-      for (const path of paths) {
-        const note = await readNote(vaultPath, path);
-        if (note) nodes.push({ id: path, body: note.body });
-      }
-      return nodes;
+      return readNodesInBatches(vaultPath, paths);
     },
     extractExplicitLinkTargets(node: SourceNode): string[] {
       // Dual-syntax: this vault's ~250 existing notes use [[wikilinks]],
@@ -74,12 +96,7 @@ export function createOkfAdapter(rootPath: string): SourceAdapter {
   return {
     async listNodes(): Promise<SourceNode[]> {
       const paths = await listNotes(rootPath);
-      const nodes: SourceNode[] = [];
-      for (const path of paths) {
-        const note = await readNote(rootPath, path);
-        if (note) nodes.push({ id: path, body: note.body });
-      }
-      return nodes;
+      return readNodesInBatches(rootPath, paths);
     },
     extractExplicitLinkTargets(node: SourceNode): string[] {
       // Wikilinks tolerated too, not just OKF's own syntax — e.g. notes
