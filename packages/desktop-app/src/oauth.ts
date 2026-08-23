@@ -11,6 +11,21 @@
 import { randomBytes, createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
+/**
+ * Neither token-exchange fetch() call below had a timeout — on a network
+ * that routes 127.0.0.1 through a system/corporate proxy (common on
+ * managed laptops) that doesn't exempt localhost, the request can hang
+ * indefinitely with no error, which surfaces in the UI as "Waiting for
+ * browser..." forever even after the user has already completed the
+ * browser-side login (confirmed via a headless repro of the full flow —
+ * mock IdP + loopback + exchange all complete in well under a second with
+ * no proxy in the way, so an indefinite hang here is a proxy/network
+ * issue, not a logic bug in the exchange itself). Bounding it means a
+ * broken network surfaces as a clear, actionable error instead of a
+ * silent hang with no recovery short of restarting the app.
+ */
+const TOKEN_REQUEST_TIMEOUT_MS = 15_000;
+
 function base64url(input: Buffer): string {
   return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -157,31 +172,49 @@ export async function exchangeCodeForTokens(opts: {
   codeVerifier: string;
   redirectUri: string;
 }): Promise<TokenResponse> {
-  const res = await fetch(new URL("/oauth/token", opts.authHost), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "authorization_code",
-      client_id: opts.clientId,
-      code: opts.code,
-      code_verifier: opts.codeVerifier,
-      redirect_uri: opts.redirectUri,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(new URL("/oauth/token", opts.authHost), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "authorization_code",
+        client_id: opts.clientId,
+        code: opts.code,
+        code_verifier: opts.codeVerifier,
+        redirect_uri: opts.redirectUri,
+      }),
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new Error(
+      `Couldn't reach the login server to finish signing in (${err instanceof Error ? err.message : String(err)}). ` +
+        "If you're on a network with a proxy, check that it doesn't intercept requests to 127.0.0.1.",
+    );
+  }
   if (!res.ok) throw new Error(`Token exchange failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as TokenResponse;
 }
 
 export async function refreshAccessToken(opts: { authHost: string; clientId: string; refreshToken: string }): Promise<TokenResponse> {
-  const res = await fetch(new URL("/oauth/token", opts.authHost), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "refresh_token",
-      client_id: opts.clientId,
-      refresh_token: opts.refreshToken,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(new URL("/oauth/token", opts.authHost), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        client_id: opts.clientId,
+        refresh_token: opts.refreshToken,
+      }),
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new Error(
+      `Couldn't reach the login server to refresh the session (${err instanceof Error ? err.message : String(err)}). ` +
+        "If you're on a network with a proxy, check that it doesn't intercept requests to 127.0.0.1.",
+    );
+  }
   if (!res.ok) throw new Error(`Token refresh failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as TokenResponse;
 }
