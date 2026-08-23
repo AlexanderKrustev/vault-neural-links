@@ -1,5 +1,6 @@
 import { extractWikilinks } from "./parser.js";
-import { listNotes, readNote } from "./notes.js";
+import { listNotes, readNote, writeNote } from "./notes.js";
+import { appendChangelogEntry } from "./changelog.js";
 
 const RELATED_HEADING = "## Related (auto-linked)";
 const MIN_TERM_LENGTH = 4;
@@ -67,6 +68,45 @@ export async function autoLinkScan(
   if (added.length === 0) return { content, added: [] };
 
   return { content: insertRelatedLinks(content, added), added };
+}
+
+
+/** Templates/ are placeholders, not real notes — skip auto-link/changelog for them. */
+export function isTemplatePath(notePath: string): boolean {
+  return notePath === "Templates" || notePath.startsWith("Templates/");
+}
+
+/**
+ * Shared write path for anything that creates/updates a real note: runs the
+ * auto-link scan, writes the file once (auto-link only ever touches the
+ * body, so scan-then-write avoids a second write), and appends a
+ * changes.jsonl entry — the same pipeline the MCP `create_note`/`update_note`
+ * tools use, extracted here so the desktop app's note editor (or any future
+ * caller) gets identical auto-link/changelog behavior instead of a second,
+ * possibly-drifting copy of this logic.
+ */
+export async function writeNoteWithAutoLink(
+  vaultPath: string,
+  notePath: string,
+  frontmatter: Record<string, unknown>,
+  body: string,
+  action: "create" | "update",
+): Promise<{ path: string; autoLinked: string[] }> {
+  if (isTemplatePath(notePath)) {
+    await writeNote(vaultPath, notePath, { frontmatter, body });
+    return { path: notePath, autoLinked: [] };
+  }
+
+  const linked = await autoLinkScan(vaultPath, notePath, body);
+  await writeNote(vaultPath, notePath, { frontmatter, body: linked.content });
+
+  await appendChangelogEntry(vaultPath, {
+    action,
+    file: `${notePath}.md`,
+    reason: "Written via vault-neural-link MCP.",
+  });
+
+  return { path: notePath, autoLinked: linked.added };
 }
 
 function insertRelatedLinks(content: string, titles: string[]): string {

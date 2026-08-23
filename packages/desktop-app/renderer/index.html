@@ -64,6 +64,24 @@
       #obsidianScreen .card .title { font-size: 13px; font-weight: 600; color: #e6e6e6; }
       #obsidianScreen .card .value { font-size: 12px; color: #9aa0a6; margin-top: 4px; }
       #obsidianScreen .actions { display: flex; justify-content: center; gap: 8px; margin-top: 20px; }
+
+      #notesHeader { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+      #notesHeader h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: #9aa0a6; margin: 0; }
+      #newNoteBtn { padding: 4px 10px; font-size: 12px; }
+      #notes li { cursor: pointer; }
+      #notes li:hover { background: #1a1d22; }
+
+      #editorOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); align-items: center; justify-content: center; z-index: 10; }
+      #editorPanel { background: #1a1d22; border: 1px solid #2c3038; border-radius: 8px; width: min(640px, 90vw); max-height: 85vh; display: flex; flex-direction: column; padding: 16px 18px; }
+      #editorPathRow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+      #editorPathRow label { font-size: 11px; color: #9aa0a6; }
+      #editorPathInput { flex: 1; background: #14161a; border: 1px solid #2c3038; color: #e6e6e6; border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit; }
+      #editorPathInput:disabled { color: #cbd0d8; opacity: 0.85; }
+      #editorBody { flex: 1; min-height: 320px; background: #14161a; border: 1px solid #2c3038; color: #e6e6e6; border-radius: 6px; padding: 10px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; resize: vertical; }
+      #editorError { color: #ff6b6b; font-size: 12px; min-height: 16px; margin-top: 8px; }
+      #editorActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+      #editorCancelBtn { background: transparent; border: 1px solid #2c3038; }
+      #editorCancelBtn:hover { background: #262a32; }
     </style>
   </head>
   <body>
@@ -137,8 +155,28 @@
         <div id="primedRow"><span class="label">Primed this session:</span><span id="primedList"></span></div>
       </div>
 
+      <div id="notesHeader">
+        <h2>Notes</h2>
+        <button id="newNoteBtn">New note</button>
+      </div>
       <ul id="notes"></ul>
     </section>
+
+    <div id="editorOverlay">
+      <div id="editorPanel">
+        <div id="editorPathRow">
+          <label for="editorPathInput">Path</label>
+          <input id="editorPathInput" type="text" placeholder="folder/note-name" />
+        </div>
+        <textarea id="editorBody" spellcheck="false"></textarea>
+        <div id="editorError"></div>
+        <div id="editorActions">
+          <button id="editorCancelBtn">Cancel</button>
+          <button id="editorSaveBtn">Save</button>
+        </div>
+      </div>
+    </div>
+
     <script src="bundle.js"></script>
   </body>
 </html>

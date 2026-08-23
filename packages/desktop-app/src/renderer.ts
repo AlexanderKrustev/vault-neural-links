@@ -5,7 +5,7 @@
  * renderer process; everything before this was plain unbundled HTML/JS.
  */
 import { ForceSim, Renderer, type NativeEdge } from "@vault-neural-links/render-core";
-import type { LinkWeightsFile, SearchHit, ActivatedNote, ActivationTraceEvent } from "@vault-neural-links/core";
+import type { LinkWeightsFile, SearchHit, ActivatedNote, ActivationTraceEvent, NoteRef } from "@vault-neural-links/core";
 
 interface FolderEdge {
   source: string;
@@ -53,7 +53,12 @@ interface VnlApi {
   search(folderPath: string, query: string): Promise<SearchHit[]>;
   activate(folderPath: string, note: string, energy?: number): Promise<ActivateResponse>;
   getPrimed(folderPath: string): Promise<string[]>;
+  readNote(folderPath: string, notePath: string): Promise<NoteRef | null>;
+  createNote(folderPath: string, notePath: string, frontmatter: Record<string, unknown>, body: string): Promise<SaveNoteResult>;
+  saveNote(folderPath: string, notePath: string, body: string): Promise<SaveNoteResult>;
 }
+
+type SaveNoteResult = { ok: true; path: string; autoLinked: string[] } | { ok: false; error: string };
 
 declare global {
   interface Window {
@@ -88,6 +93,14 @@ const searchBtn = document.getElementById("searchBtn") as HTMLButtonElement;
 const searchResultsEl = document.getElementById("searchResults")!;
 const activationInfoEl = document.getElementById("activationInfo")!;
 const primedListEl = document.getElementById("primedList")!;
+
+const newNoteBtn = document.getElementById("newNoteBtn") as HTMLButtonElement;
+const editorOverlay = document.getElementById("editorOverlay")!;
+const editorPathInput = document.getElementById("editorPathInput") as HTMLInputElement;
+const editorBody = document.getElementById("editorBody") as HTMLTextAreaElement;
+const editorErrorEl = document.getElementById("editorError")!;
+const editorSaveBtn = document.getElementById("editorSaveBtn") as HTMLButtonElement;
+const editorCancelBtn = document.getElementById("editorCancelBtn") as HTMLButtonElement;
 
 function showApp() {
   setupScreen.style.display = "none";
@@ -180,6 +193,9 @@ const EMPTY_WEIGHTS: LinkWeightsFile = { version: 1, compactedAt: new Date().toI
 let sim: ForceSim | null = null;
 let renderer: Renderer | null = null;
 let currentFolderPath: string | null = null;
+let currentSourceType: SourceType = "okf";
+/** Path of the note currently open in the editor; null while creating a new one. */
+let editingPath: string | null = null;
 
 function renderGraph(result: FolderSummary): void {
   if (!sim) {
@@ -289,6 +305,7 @@ searchInput.addEventListener("keydown", (e) => {
 async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opts: { persist?: boolean } = {}): Promise<void> {
   errorEl.textContent = "";
   currentFolderPath = folderPath;
+  currentSourceType = sourceType;
   folderPathEl.textContent = `${folderPath}  (${sourceType === "obsidian" ? "Obsidian vault" : "OKF folder"})`;
   summaryEl.innerHTML = "";
   notesEl.innerHTML = "<li>Loading…</li>";
@@ -305,6 +322,7 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opt
     for (const note of result.notes) {
       const li = document.createElement("li");
       li.innerHTML = `<span>${note.id}</span><span class="count">${note.neighborCount} link${note.neighborCount === 1 ? "" : "s"}</span>`;
+      li.addEventListener("click", () => void openEditor(note.id));
       notesEl.appendChild(li);
     }
     if (result.notes.length === 0) {
@@ -374,3 +392,70 @@ chooseObsidianBtn.addEventListener("click", () => void enterObsidianCompanion())
 switchSourceBtn.addEventListener("click", () => showSetup());
 obsidianSwitchSourceBtn.addEventListener("click", () => showSetup());
 obsidianLogoutBtn.addEventListener("click", () => void doLogout());
+
+/**
+ * Opens the note editor. `path` is an existing note's id to edit in place;
+ * pass null to create a new note (the path field becomes an editable input
+ * instead of a fixed, disabled label).
+ */
+async function openEditor(path: string | null): Promise<void> {
+  editingPath = path;
+  editorErrorEl.textContent = "";
+  editorOverlay.style.display = "flex";
+
+  if (path) {
+    editorPathInput.value = path;
+    editorPathInput.disabled = true;
+    editorBody.value = "Loading…";
+    if (!currentFolderPath) return;
+    const note = await window.vnl.readNote(currentFolderPath, path);
+    editorBody.value = note?.body ?? "";
+  } else {
+    editorPathInput.value = "";
+    editorPathInput.disabled = false;
+    editorBody.value = "";
+    editorPathInput.focus();
+  }
+}
+
+function closeEditor(): void {
+  editorOverlay.style.display = "none";
+  editingPath = null;
+}
+
+async function saveEditor(): Promise<void> {
+  if (!currentFolderPath) return;
+  editorErrorEl.textContent = "";
+
+  let result: SaveNoteResult;
+  if (editingPath) {
+    result = await window.vnl.saveNote(currentFolderPath, editingPath, editorBody.value);
+  } else {
+    const path = editorPathInput.value.trim();
+    if (!path) {
+      editorErrorEl.textContent = "Enter a note path.";
+      return;
+    }
+    result = await window.vnl.createNote(
+      currentFolderPath,
+      path,
+      { created: new Date().toISOString().slice(0, 10) },
+      editorBody.value,
+    );
+  }
+
+  if (!result.ok) {
+    editorErrorEl.textContent = result.error;
+    return;
+  }
+
+  closeEditor();
+  // Cheapest way to reflect a new/changed note (and any auto-linked edges)
+  // in the note list and graph — this app has no incremental index update
+  // yet, same tradeoff every other post-write refresh here already accepts.
+  await loadAndShowFolder(currentFolderPath, currentSourceType);
+}
+
+newNoteBtn.addEventListener("click", () => void openEditor(null));
+editorCancelBtn.addEventListener("click", () => closeEditor());
+editorSaveBtn.addEventListener("click", () => void saveEditor());

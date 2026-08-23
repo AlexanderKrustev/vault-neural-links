@@ -18,11 +18,14 @@ import {
   rebuildStructuralIndex,
   initInstance,
   searchNotes,
+  readNote,
+  writeNoteWithAutoLink,
   resolveDataDir,
   sessionBufferFilePath,
   accountSessionPath,
   writeAccountSession,
   clearAccountSession,
+  type NoteRef,
   type SourceAdapter,
   type StructuralLinksFile,
   type VaultLinkClient,
@@ -258,6 +261,44 @@ app.whenReady().then(async () => {
       throw err;
     }
   });
+
+  ipcMain.handle("notes:read", async (_event, folderPath: string, notePath: string): Promise<NoteRef | null> => {
+    return readNote(folderPath, notePath);
+  });
+
+  ipcMain.handle(
+    "notes:create",
+    async (
+      _event,
+      folderPath: string,
+      notePath: string,
+      frontmatter: Record<string, unknown>,
+      body: string,
+    ): Promise<{ ok: true; path: string; autoLinked: string[] } | { ok: false; error: string }> => {
+      const existing = await readNote(folderPath, notePath);
+      if (existing) return { ok: false, error: `A note already exists at "${notePath}".` };
+      const result = await writeNoteWithAutoLink(folderPath, notePath, frontmatter, body, "create");
+      return { ok: true, ...result };
+    },
+  );
+
+  ipcMain.handle(
+    "notes:save",
+    async (
+      _event,
+      folderPath: string,
+      notePath: string,
+      body: string,
+    ): Promise<{ ok: true; path: string; autoLinked: string[] } | { ok: false; error: string }> => {
+      // The editor only ever hands back the body — frontmatter isn't
+      // user-edited text in this first slice, so it's re-read from disk
+      // rather than round-tripped through the renderer.
+      const existing = await readNote(folderPath, notePath);
+      if (!existing) return { ok: false, error: `No note found at "${notePath}".` };
+      const result = await writeNoteWithAutoLink(folderPath, notePath, existing.frontmatter, body, "update");
+      return { ok: true, ...result };
+    },
+  );
 
   createWindow();
 

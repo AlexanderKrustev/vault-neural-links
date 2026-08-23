@@ -16,4 +16,10 @@ contextBridge.exposeInMainWorld("vnl", {
   activate: (folderPath: string, note: string, energy?: number) =>
     ipcRenderer.invoke("engine:activate", folderPath, note, energy),
   getPrimed: (folderPath: string) => ipcRenderer.invoke("engine:primed", folderPath),
+
+  readNote: (folderPath: string, notePath: string) => ipcRenderer.invoke("notes:read", folderPath, notePath),
+  createNote: (folderPath: string, notePath: string, frontmatter: Record<string, unknown>, body: string) =>
+    ipcRenderer.invoke("notes:create", folderPath, notePath, frontmatter, body),
+  saveNote: (folderPath: string, notePath: string, body: string) =>
+    ipcRenderer.invoke("notes:save", folderPath, notePath, body),
 });

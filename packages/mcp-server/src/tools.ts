@@ -1,9 +1,7 @@
 import { z } from "zod";
 import {
-  appendChangelogEntry,
   appendUnderHeading,
   AUTO_REINFORCE_BOOST,
-  autoLinkScan,
   DEFAULT_SPREADING_ACTIVATION_CONFIG,
   getEdgeWeight,
   initInstance,
@@ -11,7 +9,7 @@ import {
   readNote,
   resolveDataDir,
   searchNotes,
-  writeNote,
+  writeNoteWithAutoLink,
   type ActivationTraceEvent,
   type VaultLinkClient,
 } from "@vault-neural-links/core";
@@ -308,39 +306,6 @@ export const compactWeightsTool = {
   },
 };
 
-function isTemplatePath(notePath: string): boolean {
-  return notePath === "Templates" || notePath.startsWith("Templates/");
-}
-
-async function writeAndSync(
-  ctx: ToolContext,
-  notePath: string,
-  frontmatter: Record<string, unknown>,
-  body: string,
-  action: "create" | "update",
-) {
-  // Templates/ are placeholders, not real notes — skip auto-link/changelog
-  // for them, same exclusion the replaced PowerShell hook applied.
-  if (isTemplatePath(notePath)) {
-    await writeNote(ctx.vaultPath, notePath, { frontmatter, body });
-    return { path: notePath, autoLinked: [] };
-  }
-
-  // Auto-link scan only ever touches the body (it inserts/reads the
-  // "## Related (auto-linked)" heading there), so run it before the single
-  // write rather than writing twice.
-  const linked = await autoLinkScan(ctx.vaultPath, notePath, body);
-  await writeNote(ctx.vaultPath, notePath, { frontmatter, body: linked.content });
-
-  await appendChangelogEntry(ctx.vaultPath, {
-    action,
-    file: `${notePath}.md`,
-    reason: "Written via vault-neural-link MCP.",
-  });
-
-  return { path: notePath, autoLinked: linked.added };
-}
-
 export const createNoteTool = {
   name: "create_note",
   config: {
@@ -363,7 +328,7 @@ export const createNoteTool = {
       if (existing) {
         return textResult({ error: `Note already exists at ${path}. Use update_note instead.` });
       }
-      const result = await writeAndSync(ctx, path, frontmatter, body, "create");
+      const result = await writeNoteWithAutoLink(ctx.vaultPath, path, frontmatter, body, "create");
       return textResult({ created: true, ...result });
     },
 };
@@ -406,7 +371,7 @@ export const updateNoteTool = {
       }
 
       const newBody = appendOpts ? appendUnderHeading(existing.body, appendOpts) : body ?? existing.body;
-      const result = await writeAndSync(ctx, path, existing.frontmatter, newBody, "update");
+      const result = await writeNoteWithAutoLink(ctx.vaultPath, path, existing.frontmatter, newBody, "update");
       return textResult({ updated: true, ...result });
     },
 };
