@@ -87,8 +87,16 @@ export async function rebuildStructuralIndex(
   vaultPath: string,
   vaultDataDir: string,
   adapter: SourceAdapter = createObsidianAdapter(vaultPath),
+  prebuiltIndex?: StructuralLinksFile,
 ): Promise<{ noteCount: number; edgeCount: number; builtAt: string }> {
-  const index = await buildStructuralIndex(vaultPath, adapter);
+  // Accepts an already-built index so a caller that needed one anyway
+  // (e.g. the desktop app's workspace:load-folder, which builds one for
+  // its own summary) doesn't pay for a second full buildStructuralIndex()
+  // pass just to get this one persisted — at real-vault scale that's
+  // invisible, but at a synthetic 300k-note corpus it was a needless
+  // extra ~13s and ~150MB of peak RSS on top of an already memory-heavy
+  // operation (see AIBRAIN-118).
+  const index = prebuiltIndex ?? (await buildStructuralIndex(vaultPath, adapter));
   await persistStructuralIndex(vaultDataDir, index);
   return { noteCount: Object.keys(index.edges).length, edgeCount: countEdges(index), builtAt: index.builtAt };
 }

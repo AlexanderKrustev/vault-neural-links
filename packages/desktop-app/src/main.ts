@@ -248,8 +248,11 @@ app.whenReady().then(async () => {
       // getWeightedNeighbors's structural-fallback tier reads this file from
       // disk, it doesn't take an in-memory index. Without this, spreading
       // activation silently returns nothing for any folder that's never had
-      // its structural index persisted before.
-      await rebuildStructuralIndex(folderPath, resolveDataDir(folderPath), adapter);
+      // its structural index persisted before. Pass the index already built
+      // above — rebuildStructuralIndex() would otherwise build it a second
+      // time from scratch, doubling both the time and peak memory of this
+      // handler for nothing (confirmed at 300k-note scale, AIBRAIN-118).
+      await rebuildStructuralIndex(folderPath, resolveDataDir(folderPath), adapter, index);
 
       return summarize(
         folderPath,
