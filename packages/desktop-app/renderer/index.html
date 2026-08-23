@@ -82,6 +82,13 @@
       #editorActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
       #editorCancelBtn { background: transparent; border: 1px solid #2c3038; }
       #editorCancelBtn:hover { background: #262a32; }
+
+      #mcpConnect { background: #1e2127; border: 1px solid #2c3038; border-radius: 8px; padding: 12px 16px; margin-top: 16px; }
+      #mcpConnect .title { font-size: 13px; font-weight: 600; }
+      #mcpConnect .desc { font-size: 12px; color: #9aa0a6; margin-top: 4px; }
+      #mcpConnectRow { display: flex; gap: 8px; margin-top: 10px; }
+      #mcpConnectCommand { flex: 1; background: #14161a; border: 1px solid #2c3038; color: #cbd0d8; border-radius: 6px; padding: 8px 10px; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-x: auto; white-space: pre; }
+      #copyMcpCommandBtn { flex-shrink: 0; }
     </style>
   </head>
   <body>
@@ -160,6 +167,15 @@
         <button id="newNoteBtn">New note</button>
       </div>
       <ul id="notes"></ul>
+
+      <div id="mcpConnect">
+        <div class="title">Connect an AI client</div>
+        <div class="desc">The MCP server ships inside this app — no separate install or repo clone needed. Run this to register it with Claude Code, or swap the client for any other MCP-compatible one.</div>
+        <div id="mcpConnectRow">
+          <div id="mcpConnectCommand"></div>
+          <button id="copyMcpCommandBtn">Copy</button>
+        </div>
+      </div>
     </section>
 
     <div id="editorOverlay">

@@ -45,6 +45,35 @@ function createAdapter(folderPath: string, sourceType: SourceType): SourceAdapte
   return sourceType === "obsidian" ? createObsidianAdapter(folderPath) : createOkfAdapter(folderPath);
 }
 
+
+/**
+ * "Bundling the MCP server into the app" (AIBRAIN-63) means: the app ships
+ * @vault-neural-links/mcp-server as its own dependency, so an external MCP
+ * client (Claude Code, Codex CLI, Gemini CLI, etc.) can register it by
+ * pointing at a path that lives inside this app's own install — no
+ * separate git-clone/npm-build of this monorepo required. It does NOT
+ * change the server's operational model: each registered client still
+ * spawns its own stdio subprocess exactly as `claude mcp add` does today
+ * (whether a single long-lived process could instead be shared across
+ * multiple registered clients is still an open, undecided question per
+ * the 2026-08-18 architecture note — not resolved here).
+ */
+const MCP_VAULT_ENV_VAR = "CLAUDE_VAULT_PATH";
+
+interface McpConnectionInfo {
+  /** Absolute path to the bundled mcp-server's compiled entry point. */
+  serverPath: string;
+  /** Env var the bundled server reads for the vault/OKF folder root — surfaced so the UI's copy-paste command is actually correct, not guessed. */
+  envVarName: string;
+}
+
+function bundledMcpServerPath(): string {
+  // require.resolve only computes the path via Node's CJS resolution
+  // algorithm — it never loads/executes the target, so this is safe even
+  // though mcp-server itself is an ESM package ("type": "module").
+  return require.resolve("@vault-neural-links/mcp-server");
+}
+
 interface Workspace {
   folderPath: string;
   sourceType: SourceType;
@@ -260,6 +289,10 @@ app.whenReady().then(async () => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw err;
     }
+  });
+
+  ipcMain.handle("mcp:get-connection-info", async (): Promise<McpConnectionInfo> => {
+    return { serverPath: bundledMcpServerPath(), envVarName: MCP_VAULT_ENV_VAR };
   });
 
   ipcMain.handle("notes:read", async (_event, folderPath: string, notePath: string): Promise<NoteRef | null> => {

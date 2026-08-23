@@ -56,6 +56,12 @@ interface VnlApi {
   readNote(folderPath: string, notePath: string): Promise<NoteRef | null>;
   createNote(folderPath: string, notePath: string, frontmatter: Record<string, unknown>, body: string): Promise<SaveNoteResult>;
   saveNote(folderPath: string, notePath: string, body: string): Promise<SaveNoteResult>;
+  getMcpConnectionInfo(): Promise<McpConnectionInfo>;
+}
+
+interface McpConnectionInfo {
+  serverPath: string;
+  envVarName: string;
 }
 
 type SaveNoteResult = { ok: true; path: string; autoLinked: string[] } | { ok: false; error: string };
@@ -93,6 +99,9 @@ const searchBtn = document.getElementById("searchBtn") as HTMLButtonElement;
 const searchResultsEl = document.getElementById("searchResults")!;
 const activationInfoEl = document.getElementById("activationInfo")!;
 const primedListEl = document.getElementById("primedList")!;
+
+const mcpConnectCommandEl = document.getElementById("mcpConnectCommand")!;
+const copyMcpCommandBtn = document.getElementById("copyMcpCommandBtn") as HTMLButtonElement;
 
 const newNoteBtn = document.getElementById("newNoteBtn") as HTMLButtonElement;
 const editorOverlay = document.getElementById("editorOverlay")!;
@@ -224,6 +233,33 @@ async function refreshPrimed(): Promise<void> {
   renderer?.setPrimedNotes(new Set(primed));
 }
 
+/**
+ * Builds the copy-paste `claude mcp add` command pointed at the bundled
+ * mcp-server binary and the currently-open folder — the concrete point of
+ * "bundling the MCP server into the app": an external MCP client only
+ * needs this command, not a git clone of the monorepo.
+ */
+async function refreshMcpConnectInfo(): Promise<void> {
+  if (!currentFolderPath) return;
+  const { serverPath, envVarName } = await window.vnl.getMcpConnectionInfo();
+  const escapedFolder = currentFolderPath.includes(" ") ? `"${currentFolderPath}"` : currentFolderPath;
+  mcpConnectCommandEl.textContent =
+    `${envVarName}=${escapedFolder} claude mcp add vault-neural-link --scope user -- node "${serverPath}"`;
+}
+
+copyMcpCommandBtn.addEventListener("click", () => {
+  void navigator.clipboard.writeText(mcpConnectCommandEl.textContent ?? "").then(
+    () => {
+      copyMcpCommandBtn.textContent = "Copied!";
+      setTimeout(() => (copyMcpCommandBtn.textContent = "Copy"), 1500);
+    },
+    () => {
+      copyMcpCommandBtn.textContent = "Copy failed";
+      setTimeout(() => (copyMcpCommandBtn.textContent = "Copy"), 1500);
+    },
+  );
+});
+
 const HOP_STAGGER_MS = 350;
 
 /**
@@ -333,6 +369,7 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opt
     searchResultsEl.innerHTML = "";
     activationInfoEl.textContent = "Click a node in the graph, or a search result, to run spreading activation from it.";
     await refreshPrimed();
+    await refreshMcpConnectInfo();
     showApp();
   } catch (err) {
     // Surface the failure on the setup screen, not #error inside #appScreen — appScreen is

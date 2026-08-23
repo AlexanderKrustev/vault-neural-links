@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@vault-neural-links/core": "*",
+    "@vault-neural-links/mcp-server": "*",
     "@vault-neural-links/render-core": "*"
   },
   "devDependencies": {
