@@ -85,12 +85,23 @@ describe("activate (spreading activation)", () => {
   });
 
   it("accumulates energy from multiple indirect paths to the same note", async () => {
-    // Both B and C link directly to D, so D is reachable via two separate
-    // two-hop paths from A and should accumulate energy from both.
+    // B, C, and E all link directly to D, so D is reachable via three
+    // separate two-hop paths from A and should accumulate energy from all
+    // of them. Three paths (not two) deliberately gives a wide margin over
+    // the single-path case: with equal weight_deltas throughout, the
+    // undirected back-edge each intermediate note holds to A dilutes its
+    // share of *any* hop-2 transfer by the same fixed fraction regardless
+    // of hop count, so a 2-vs-1-path version of this test can coincide
+    // almost exactly (observed: ~4.050000048736912 vs ~4.050000064982548,
+    // differing only in the 8th significant digit — pure floating-point
+    // summation-order noise, not a real signal) and flips on unrelated
+    // changes to iteration order. Three paths clears that by construction.
     await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 10 }));
     await appendEvent(dataDir, "inst-1", event({ from: "A", to: "C", weight_delta: 10 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "E", weight_delta: 10 }));
     await appendEvent(dataDir, "inst-1", event({ from: "B", to: "D", weight_delta: 10 }));
     await appendEvent(dataDir, "inst-1", event({ from: "C", to: "D", weight_delta: 10 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "E", to: "D", weight_delta: 10 }));
     await compact(dataDir);
 
     const viaOnePath = await activate(dataDir, "A", 10, {

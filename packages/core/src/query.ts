@@ -119,7 +119,6 @@ export async function computeLiveNeighborWeights(
   const weights = await loadWeights(vaultDataDir);
   const importance = layers.importance ? await loadNoteImportance(vaultDataDir) : null;
   const now = new Date();
-  const neighbors: WeightedNeighbor[] = [];
   const seen = new Set<string>();
 
   // AIBRAIN-21: final_score = activation_score * (1 + λ * importance) — a
@@ -134,14 +133,21 @@ export async function computeLiveNeighborWeights(
     return weight * (1 + importanceConfig.blendLambda * score);
   }
 
+  interface Candidate {
+    path: string;
+    baseWeight: number;
+    lastTouched: string;
+    source: "usage" | "structural";
+  }
+  const candidates: Candidate[] = [];
+
   if (weights) {
     for (const [key, record] of Object.entries(weights.edges)) {
       const [a, b] = key.split("|");
       const other = a === note ? b : b === note ? a : undefined;
       if (other === undefined) continue;
       const baseWeight = await liveWeight(vaultPath, other, record, now, undefined, layers);
-      const weight = sessionBuffer && layers.priming ? baseWeight + primingBonus(other, sessionBuffer) : baseWeight;
-      neighbors.push({ path: other, weight: withImportance(other, weight), lastTouched: record.lastTouched, source: "usage" });
+      candidates.push({ path: other, baseWeight, lastTouched: record.lastTouched, source: "usage" });
       seen.add(other);
     }
   }
@@ -156,13 +162,41 @@ export async function computeLiveNeighborWeights(
     const structural = await loadStructuralIndex(vaultDataDir);
     for (const other of structural?.edges[note] ?? []) {
       if (seen.has(other)) continue;
-      const weight =
-        sessionBuffer && layers.priming
-          ? structuralFallback.floorWeight + primingBonus(other, sessionBuffer)
-          : structuralFallback.floorWeight;
-      neighbors.push({ path: other, weight: withImportance(other, weight), lastTouched: structural!.builtAt, source: "structural" });
+      candidates.push({ path: other, baseWeight: structuralFallback.floorWeight, lastTouched: structural!.builtAt, source: "structural" });
     }
   }
+
+  const primed = (path: string) => Boolean(sessionBuffer && layers.priming && sessionBuffer.has(path));
+
+  // AIBRAIN-130: priming used to add a flat bonus (PrimingConfig.bonus) on
+  // top of raw usage weight. That bonus reliably beat the structural floor
+  // (which is why the zero-usage condition ranked well) but had no
+  // relationship to real usage weight, which isn't bounded anywhere near
+  // it — a generic hub note traversed from many unrelated sessions could
+  // (and did, reproducibly) permanently outrank a note the current session
+  // had just touched, for any query sharing that hub's neighborhood.
+  //
+  // Fix: a primed neighbor's final weight is floored at "the strongest
+  // UNPRIMED neighbor in this same set, plus a small margin" — just enough
+  // to reliably win the local comparison — rather than an arbitrary large
+  // constant. A large constant would work for simple ranking but this
+  // function is also activate()'s per-hop energy-share basis (weight /
+  // totalWeight), where an unbounded boost would make a primed neighbor
+  // swallow ~100% of a hop's outgoing energy instead of just winning the
+  // comparison, distorting multi-hop spreading far beyond what fixing the
+  // rank-1 regression requires.
+  const unprimedFinal = candidates.filter((c) => !primed(c.path)).map((c) => withImportance(c.path, c.baseWeight));
+  const unprimedMax = unprimedFinal.length > 0 ? Math.max(...unprimedFinal) : 0;
+  const PRIMING_WIN_MARGIN = 0.01;
+
+  const neighbors: WeightedNeighbor[] = candidates.map((c) => {
+    if (!primed(c.path)) {
+      return { path: c.path, weight: withImportance(c.path, c.baseWeight), lastTouched: c.lastTouched, source: c.source };
+    }
+    const ownWeight = withImportance(c.path, c.baseWeight + primingBonus(c.path, sessionBuffer!));
+    const weight = Math.max(ownWeight, unprimedMax + PRIMING_WIN_MARGIN);
+    return { path: c.path, weight, lastTouched: c.lastTouched, source: c.source };
+  });
 
   return neighbors;
 }

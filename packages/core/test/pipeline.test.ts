@@ -7,6 +7,7 @@ import { compact } from "../src/compactor.js";
 import { getEdgeWeight, getWeightedNeighbors } from "../src/query.js";
 import { rebuildStructuralIndex } from "../src/structuralLinks.js";
 import { runImportanceComputation } from "../src/importance.js";
+import { SessionBuffer } from "../src/priming.js";
 import type { EventLogEntry } from "../src/types.js";
 
 function event(overrides: Partial<EventLogEntry>): EventLogEntry {
@@ -383,5 +384,79 @@ describe("AIBRAIN-21: PageRank importance blended into retrieval weight", () => 
 
     const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
     expect(neighbors[0].weight).toBeCloseTo(5, 5);
+  });
+});
+
+// AIBRAIN-130: real accumulated usage weight was making rank-1 accuracy
+// WORSE than a zeroed-usage baseline (9/18 vs 15/18 on the live vault's
+// ground-truth query set). Root cause: priming added a flat bonus
+// (PrimingConfig.bonus, +2) that reliably beat the structural floor (0.1)
+// but not real usage weight, which isn't bounded anywhere near it — a
+// generic hub note with real accumulated weight could permanently outrank
+// a note the current session had just touched. Fix: a primed neighbor's
+// weight is floored at "the strongest unprimed neighbor in this same set,
+// plus a small margin" instead of a flat additive bonus.
+describe("AIBRAIN-130: primed neighbor beats a stronger unprimed hub", () => {
+  let dataDir: string;
+  let vaultPath: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-priming-tier-data-"));
+    vaultPath = await mkdtemp(join(tmpdir(), "vnl-test-priming-tier-vault-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(vaultPath, { recursive: true, force: true });
+  });
+
+  it("ranks a primed neighbor above an unprimed neighbor with far more real usage weight", async () => {
+    // Hub accumulates real usage weight ~9 (repeated traversal, no
+    // reinforcement to keep it simple) — well above priming's flat +2.
+    for (let i = 0; i < 9; i++) {
+      await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Hub", weight_delta: 1 }));
+    }
+    // Target has a small amount of its own usage weight, but far less than Hub's.
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Target", weight_delta: 1 }));
+    await compact(dataDir);
+
+    const withoutPriming = await getWeightedNeighbors(dataDir, "Origin", 10);
+    expect(withoutPriming[0].path).toBe("Hub"); // confirms the setup: Hub genuinely outweighs Target pre-priming
+
+    const buffer = new SessionBuffer();
+    buffer.touch("Target"); // "the session already read Target"
+    const primed = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer);
+    expect(primed[0].path).toBe("Target");
+    expect(primed.find((n) => n.path === "Target")!.weight).toBeGreaterThan(
+      primed.find((n) => n.path === "Hub")!.weight,
+    );
+  });
+
+  it("does not inflate a primed neighbor's weight beyond what's needed to beat local competition", async () => {
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Hub", weight_delta: 3 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Target", weight_delta: 1 }));
+    await compact(dataDir);
+
+    const buffer = new SessionBuffer();
+    buffer.touch("Target");
+    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer);
+    const target = neighbors.find((n) => n.path === "Target")!;
+    const hub = neighbors.find((n) => n.path === "Hub")!;
+
+    expect(target.weight).toBeGreaterThan(hub.weight);
+    // The margin over Hub should be small (a deliberate local floor, not an
+    // arbitrary large constant) — otherwise activate()'s proportional
+    // energy-share math would let a primed neighbor swallow ~100% of a
+    // hop's outgoing energy instead of just winning the comparison.
+    expect(target.weight - hub.weight).toBeLessThan(1);
+  });
+
+  it("leaves ranking unchanged when nothing in the neighbor set is primed", async () => {
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Hub", weight_delta: 9 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Target", weight_delta: 1 }));
+    await compact(dataDir);
+
+    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, new SessionBuffer());
+    expect(neighbors[0].path).toBe("Hub");
   });
 });
