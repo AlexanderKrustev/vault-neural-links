@@ -95,8 +95,8 @@ async function mkdtempSubdir(vaultPath: string, name: string): Promise<void> {
 describe("buildStructuralIndex with a non-Obsidian SourceAdapter (AIBRAIN-33)", () => {
   it("builds edges from a synthetic adapter with no filesystem involved", async () => {
     const nodes: SourceNode[] = [
-      { id: "page-1", body: "references page-2" },
-      { id: "page-2", body: "no outgoing references" },
+      { id: "page-1", body: "references page-2", aliases: [] },
+      { id: "page-2", body: "no outgoing references", aliases: [] },
     ];
     const adapter: SourceAdapter = {
       async listNodes() {
@@ -120,7 +120,7 @@ describe("buildStructuralIndex with a non-Obsidian SourceAdapter (AIBRAIN-33)", 
   });
 
   it("drops an unresolvable link target instead of guessing", async () => {
-    const nodes: SourceNode[] = [{ id: "page-1", body: "" }];
+    const nodes: SourceNode[] = [{ id: "page-1", body: "", aliases: [] }];
     const adapter: SourceAdapter = {
       async listNodes() {
         return nodes;

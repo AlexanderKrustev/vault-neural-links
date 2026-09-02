@@ -20,6 +20,8 @@ export interface SourceNode {
   id: string;
   /** Raw text content: scanned for explicit links here, and the basis for keyword search / future AI-inferred edges. */
   body: string;
+  /** Frontmatter aliases, if any (AIBRAIN-133) — indexed alongside body/title so alias-only matches are still covered by the content index. */
+  aliases: string[];
 }
 
 export interface SourceAdapter {
@@ -58,7 +60,10 @@ async function readNodesInBatches(rootPath: string, paths: string[]): Promise<So
     const notes = await Promise.all(batch.map((path) => readNote(rootPath, path)));
     for (let j = 0; j < notes.length; j++) {
       const note = notes[j];
-      if (note) nodes.push({ id: batch[j], body: note.body });
+      if (note) {
+        const aliases = Array.isArray(note.frontmatter.aliases) ? (note.frontmatter.aliases as string[]) : [];
+        nodes.push({ id: batch[j], body: note.body, aliases });
+      }
     }
   }
   return nodes;

@@ -20,12 +20,19 @@ describe("createObsidianAdapter", () => {
     await writeNote(vaultPath, "Notes/Foo", { frontmatter: { type: "atomic" }, body: "Hello" });
     const adapter = createObsidianAdapter(vaultPath);
     const nodes = await adapter.listNodes();
-    expect(nodes).toEqual([{ id: "Notes/Foo", body: expect.stringContaining("Hello") }]);
+    expect(nodes).toEqual([{ id: "Notes/Foo", body: expect.stringContaining("Hello"), aliases: [] }]);
+  });
+
+  it("surfaces frontmatter aliases on the source node (AIBRAIN-133)", async () => {
+    await writeNote(vaultPath, "Notes/Foo", { frontmatter: { aliases: ["Foo Bar", "FB"] }, body: "Hello" });
+    const adapter = createObsidianAdapter(vaultPath);
+    const nodes = await adapter.listNodes();
+    expect(nodes[0].aliases).toEqual(["Foo Bar", "FB"]);
   });
 
   it("extracts wikilink targets", () => {
     const adapter = createObsidianAdapter(vaultPath);
-    const targets = adapter.extractExplicitLinkTargets({ id: "A", body: "See [[B]]." });
+    const targets = adapter.extractExplicitLinkTargets({ id: "A", body: "See [[B]].", aliases: [] });
     expect(targets).toEqual(["B"]);
   });
 
@@ -34,6 +41,7 @@ describe("createObsidianAdapter", () => {
     const targets = adapter.extractExplicitLinkTargets({
       id: "A",
       body: "See [[B]] and [C](c.md).",
+      aliases: [],
     });
     expect(targets).toEqual(["B", "c"]);
   });
@@ -58,7 +66,7 @@ describe("createOkfAdapter", () => {
     const adapter = createOkfAdapter(rootPath);
     const nodes = await adapter.listNodes();
     expect(nodes).toEqual([
-      { id: "concepts/foo", body: expect.stringContaining("Hello OKF") },
+      { id: "concepts/foo", body: expect.stringContaining("Hello OKF"), aliases: [] },
     ]);
   });
 
@@ -67,6 +75,7 @@ describe("createOkfAdapter", () => {
     const targets = adapter.extractExplicitLinkTargets({
       id: "A",
       body: "Related: [Bar](concepts/bar.md).",
+      aliases: [],
     });
     expect(targets).toEqual(["concepts/bar"]);
   });
@@ -76,14 +85,15 @@ describe("createOkfAdapter", () => {
     const targets = adapter.extractExplicitLinkTargets({
       id: "A",
       body: "[Bar](bar.md) and [[Legacy]]",
+      aliases: [],
     });
     expect(targets).toEqual(["bar", "Legacy"]);
   });
 
   it("produces the same structural edges from OKF-only and wikilink-only notes", () => {
     const adapter = createOkfAdapter(rootPath);
-    const viaOkf = adapter.extractExplicitLinkTargets({ id: "A", body: "[Bar](bar.md)" });
-    const viaWikilink = adapter.extractExplicitLinkTargets({ id: "B", body: "[[bar]]" });
+    const viaOkf = adapter.extractExplicitLinkTargets({ id: "A", body: "[Bar](bar.md)", aliases: [] });
+    const viaWikilink = adapter.extractExplicitLinkTargets({ id: "B", body: "[[bar]]", aliases: [] });
     expect(viaOkf).toEqual(["bar"]);
     expect(viaWikilink).toEqual(["bar"]);
   });

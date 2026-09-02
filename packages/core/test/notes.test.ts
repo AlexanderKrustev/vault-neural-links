@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendUnderHeading, listNotes, readNote, searchNotes, writeNote } from "../src/notes.js";
+import { rebuildContentIndex } from "../src/contentIndex.js";
 
 describe("notes", () => {
   let vaultPath: string;
@@ -138,5 +139,62 @@ describe("notes", () => {
     const hits = await searchNotes(vaultPath, "widget", { useWeights: false });
     expect(hits[0].path).toBe("Notes/Widget");
     expect(hits[0].score).toBeGreaterThan(hits[1].score);
+  });
+});
+
+// AIBRAIN-133: a persisted content index narrows which notes searchNotes
+// actually has to read, instead of scanning every note in the vault on
+// every query. It must be purely a performance optimization — same
+// results whether or not an index exists — and must never silently miss
+// a note created after the index was last built.
+describe("searchNotes with a content index", () => {
+  let vaultPath: string;
+  let dataDir: string;
+
+  beforeEach(async () => {
+    vaultPath = await mkdtemp(join(tmpdir(), "vnl-notes-index-test-vault-"));
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-notes-index-test-data-"));
+  });
+
+  afterEach(async () => {
+    await rm(vaultPath, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("finds the same results with an index as without one", async () => {
+    await writeNote(vaultPath, "Apple Device Tips", { frontmatter: {}, body: "iOS tips" });
+    await writeNote(vaultPath, "Other", { frontmatter: { aliases: ["banana"] }, body: "nothing relevant" });
+    await writeNote(vaultPath, "Third", { frontmatter: {}, body: "mentions apple somewhere" });
+    await rebuildContentIndex(vaultPath, dataDir);
+
+    const withIndex = await searchNotes(vaultPath, "apple", { vaultDataDir: dataDir, useWeights: false });
+    const withoutIndex = await searchNotes(vaultPath, "apple", { useWeights: false });
+    expect(withIndex.map((h) => h.path).sort()).toEqual(withoutIndex.map((h) => h.path).sort());
+  });
+
+  it("still finds a note created after the index was last built (staleness fallback)", async () => {
+    await writeNote(vaultPath, "Old Note", { frontmatter: {}, body: "nothing relevant here" });
+    await rebuildContentIndex(vaultPath, dataDir);
+
+    // Written after the index snapshot above — not in any posting list.
+    await writeNote(vaultPath, "Brand New Note", { frontmatter: {}, body: "zebra unicorn" });
+
+    const hits = await searchNotes(vaultPath, "zebra", { vaultDataDir: dataDir, useWeights: false });
+    expect(hits.map((h) => h.path)).toContain("Brand New Note");
+  });
+
+  it("falls back to a full scan when no index has been built yet", async () => {
+    await writeNote(vaultPath, "Note", { frontmatter: {}, body: "findable text" });
+    // No rebuildContentIndex call — dataDir has no content-index.json.
+    const hits = await searchNotes(vaultPath, "findable", { vaultDataDir: dataDir, useWeights: false });
+    expect(hits.map((h) => h.path)).toContain("Note");
+  });
+
+  it("returns no hits via the index for tokens that appear in no note", async () => {
+    await writeNote(vaultPath, "Note", { frontmatter: {}, body: "findable text" });
+    await rebuildContentIndex(vaultPath, dataDir);
+
+    const hits = await searchNotes(vaultPath, "nonexistentword", { vaultDataDir: dataDir, useWeights: false });
+    expect(hits).toEqual([]);
   });
 });

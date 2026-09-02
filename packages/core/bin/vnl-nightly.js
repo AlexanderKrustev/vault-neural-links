@@ -8,6 +8,7 @@
 // meaningless.
 import {
   compact,
+  rebuildContentIndex,
   rebuildStructuralIndex,
   resolveDataDir,
   runClusterComputation,
@@ -37,6 +38,12 @@ compact(vaultDataDir)
   .then((structuralResult) => {
     console.log(
       `structural index: ${structuralResult.edgeCount} edges across ${structuralResult.noteCount} notes at ${structuralResult.builtAt}`,
+    );
+    return rebuildContentIndex(vaultPath, vaultDataDir);
+  })
+  .then((contentIndexResult) => {
+    console.log(
+      `content index: ${contentIndexResult.tokenCount} tokens across ${contentIndexResult.noteCount} notes at ${contentIndexResult.builtAt}`,
     );
     return runImportanceComputation(vaultDataDir);
   })

@@ -27,6 +27,8 @@ export * from "./priming.js";
 export { appendEvent, appendSearchLog } from "./logger.js";
 export { compact } from "./compactor.js";
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
+export { buildContentIndex, loadContentIndex, rebuildContentIndex, candidatesFromIndex } from "./contentIndex.js";
+export { tokenize } from "./tokenize.js";
 export {
   createObsidianAdapter,
   createOkfAdapter,

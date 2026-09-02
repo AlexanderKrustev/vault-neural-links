@@ -1,5 +1,7 @@
 import { compact } from "./compactor.js";
-import { rebuildStructuralIndex } from "./structuralLinks.js";
+import { buildStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
+import { buildContentIndex, rebuildContentIndex } from "./contentIndex.js";
+import { createObsidianAdapter } from "./adapters.js";
 import { runNightlyConsolidation } from "./consolidation.js";
 import { loadNoteImportance, runImportanceComputation } from "./importance.js";
 import { runClusterComputation } from "./clustering.js";
@@ -12,6 +14,7 @@ export interface NightlyRunResult {
   structuralEdgeCount?: number;
   noteCount?: number;
   clusterCount?: number;
+  contentIndexTokenCount?: number;
   computedAt?: string;
 }
 
@@ -43,7 +46,18 @@ export async function runNightlyIfStale(
 
   const compaction = await compact(vaultDataDir, onEvent);
   const consolidation = await runNightlyConsolidation(vaultDataDir, undefined, now);
-  const structural = await rebuildStructuralIndex(vaultPath, vaultDataDir);
+
+  // AIBRAIN-133: one adapter.listNodes() pass shared between the structural
+  // and content indexes, instead of each rebuilding it independently — a
+  // real cost at scale (~17s/300k notes, AIBRAIN-131), not worth paying twice
+  // in the same pipeline run.
+  const adapter = createObsidianAdapter(vaultPath);
+  const nodes = await adapter.listNodes();
+  const structuralIndex = await buildStructuralIndex(vaultPath, adapter, nodes);
+  const structural = await rebuildStructuralIndex(vaultPath, vaultDataDir, adapter, structuralIndex);
+  const contentIndex = await buildContentIndex(vaultPath, adapter, nodes);
+  const contentIndexResult = await rebuildContentIndex(vaultPath, vaultDataDir, adapter, contentIndex);
+
   const importance = await runImportanceComputation(vaultDataDir, undefined, now);
   const clustering = await runClusterComputation(vaultDataDir, undefined, now);
 
@@ -54,6 +68,7 @@ export async function runNightlyIfStale(
     structuralEdgeCount: structural.edgeCount,
     noteCount: importance.noteCount,
     clusterCount: clustering.clusterCount,
+    contentIndexTokenCount: contentIndexResult.tokenCount,
     computedAt: importance.computedAt,
   };
 }

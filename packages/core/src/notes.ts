@@ -3,6 +3,8 @@ import { dirname, join, relative, sep } from "node:path";
 import { parseFrontmatter, serializeNote, type ParsedNote } from "./frontmatter.js";
 import { getWeightedNeighbors } from "./query.js";
 import { readSupersession } from "./relations.js";
+import { candidatesFromIndex, loadContentIndex } from "./contentIndex.js";
+import { tokenize } from "./tokenize.js";
 
 // See searchNotes' weight-scoring step: caps how many textual hits get a
 // disk-backed weight lookup, and how many of those run concurrently, so a
@@ -206,16 +208,6 @@ const ALIAS_TIER = 500;
 const CONTENT_TIER = 100;
 const WEIGHT_TIEBREAK_CAP = 10;
 
-// AIBRAIN-138: the query used to be treated as one literal contiguous
-// substring, so a query whose words were all present in a note but not
-// contiguous (e.g. out of the note's own word order) returned no hits at
-// all — indistinguishable from the note not existing. Tokenizing and
-// accepting an all-tokens-present match (scored lower than an exact phrase
-// match, never higher) fixes that without weakening exact-phrase relevance.
-function tokenize(text: string): string[] {
-  return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-}
-
 interface FieldMatch {
   hit: boolean;
   /** 0 (no match) .. ~1.25 (exact phrase, repeated). Multiply by a tier to rank. */
@@ -257,7 +249,29 @@ export async function searchNotes(
   const { topK = 10, vaultDataDir, useWeights = true } = opts;
   const needle = query.toLowerCase();
   const needleTokens = tokenize(query);
-  const paths = await listNotes(vaultPath);
+  const allPaths = await listNotes(vaultPath);
+
+  // AIBRAIN-133: narrow which notes actually need reading via the
+  // persisted content index, when one exists — the alternative to always
+  // scanning every note in the vault, which measured 129.5s against a
+  // 300k-note corpus even after AIBRAIN-132's crash fix. The index can be
+  // stale (rebuilt nightly, not on every write, matching structural-links
+  // .json/note-importance.json's existing accepted-staleness convention),
+  // so paths it doesn't cover yet (created/renamed since the last rebuild)
+  // are always unioned back in and scanned directly like before — this
+  // can only ever be slower than a fully warm index, never silently miss
+  // a real note. No index yet (fresh vault, or before the first nightly
+  // run) falls back to exactly the pre-AIBRAIN-133 full-scan behavior.
+  let paths = allPaths;
+  if (vaultDataDir && needleTokens.length > 0) {
+    const index = await loadContentIndex(vaultDataDir);
+    if (index) {
+      const covered = new Set(index.coveredPaths);
+      const candidates = candidatesFromIndex(index, needleTokens);
+      const uncovered = allPaths.filter((path) => !covered.has(path));
+      paths = [...new Set([...candidates, ...uncovered])].sort();
+    }
+  }
 
   // Text-matching pass, run in bounded concurrent batches rather than one
   // note at a time: a title match is free (no disk read), but anything that

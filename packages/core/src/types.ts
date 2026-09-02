@@ -229,6 +229,33 @@ export interface StructuralLinksFile {
 }
 
 /**
+ * AIBRAIN-133: persisted inverted index over note titles, frontmatter
+ * aliases, and body content, so searchNotes doesn't have to read every
+ * note in the vault on every query — a full linear scan measured at
+ * 129.5s against a 300k-note corpus even after AIBRAIN-132's crash fix.
+ * Same accepted-staleness convention as structural-links.json/
+ * note-importance.json: rebuilt by the nightly pipeline, not synchronously
+ * on every write. `coveredPaths` lets a reader detect notes created or
+ * renamed since the last rebuild and fall back to scanning just those
+ * directly, so a stale index can only ever be slower than fully warm,
+ * never silently miss a real note.
+ */
+export interface ContentIndexFile {
+  version: number;
+  builtAt: string;
+  /** Every note path this index covers, sorted — see the staleness note above. */
+  coveredPaths: string[];
+  /**
+   * Lowercased token -> sorted note paths whose title, aliases, or body
+   * contain that token at least once. Field-agnostic by design: this only
+   * narrows which notes are worth reading at all — searchNotes's matchField
+   * still re-derives the real match tier (title/alias/content) and quality
+   * from live content for whatever candidate set this produces.
+   */
+  postings: Record<string, string[]>;
+}
+
+/**
  * Controls the retrieval fallback tier that treats a plain wikilink as
  * weak-but-real evidence of a relationship, so a note pair with no usage
  * history yet doesn't score identically to two unrelated notes. Only

@@ -85,35 +85,40 @@ describe("activate (spreading activation)", () => {
   });
 
   it("accumulates energy from multiple indirect paths to the same note", async () => {
-    // B, C, and E all link directly to D, so D is reachable via three
-    // separate two-hop paths from A and should accumulate energy from all
-    // of them. Three paths (not two) deliberately gives a wide margin over
-    // the single-path case: with equal weight_deltas throughout, the
-    // undirected back-edge each intermediate note holds to A dilutes its
-    // share of *any* hop-2 transfer by the same fixed fraction regardless
-    // of hop count, so a 2-vs-1-path version of this test can coincide
-    // almost exactly (observed: ~4.050000048736912 vs ~4.050000064982548,
-    // differing only in the 8th significant digit — pure floating-point
-    // summation-order noise, not a real signal) and flips on unrelated
-    // changes to iteration order. Three paths clears that by construction.
+    // B and C both link directly to D, so D is reachable via two separate
+    // two-hop paths from A and should accumulate energy from both.
+    //
+    // The two A-side edges are deliberately UNEQUAL weight (10 vs 5), not
+    // a cosmetic choice: with every edge in a symmetric-branch topology set
+    // to the *same* weight, this comparison is provably a coin flip, not a
+    // real signal. Algebraically, when A fans out to N identical branches
+    // that each forward the same fixed fraction of what they receive to D,
+    // A's 1/N split and each branch's own fixed downstream fraction cancel
+    // exactly — total energy at D comes out equal for N=1, N=2, N=3, ...,
+    // independent of path count. That's exactly what an earlier version of
+    // this test hit (equal-weight branches, "3 paths vs 1" expected to
+    // widen the gap and instead still tied to 8 significant digits,
+    // ~4.050000048736912 vs ~4.050000064982548 — pure floating-point
+    // summation-order noise flipping which side of an exact tie won).
+    // Asymmetric weights break that cancellation for a real, non-coincidental
+    // margin (computed: 4.5 with both branches vs 4.05 with only the
+    // stronger one — an 11% gap, not a rounding error).
     await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 10 }));
-    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "C", weight_delta: 10 }));
-    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "E", weight_delta: 10 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "A", to: "C", weight_delta: 5 }));
     await appendEvent(dataDir, "inst-1", event({ from: "B", to: "D", weight_delta: 10 }));
     await appendEvent(dataDir, "inst-1", event({ from: "C", to: "D", weight_delta: 10 }));
-    await appendEvent(dataDir, "inst-1", event({ from: "E", to: "D", weight_delta: 10 }));
     await compact(dataDir);
 
-    const viaOnePath = await activate(dataDir, "A", 10, {
+    const viaBothPaths = await activate(dataDir, "A", 10, {
       energyEdgeWeightDecayPerHop: 0.9,
       maxHops: 2,
       minThreshold: 0.001,
       structuralMinThreshold: 0.001,
     });
-    const d = viaOnePath.find((n) => n.path === "D")!;
+    const d = viaBothPaths.find((n) => n.path === "D")!;
 
-    // Remove one of the two paths and compare — D should get strictly less
-    // energy when reachable through only one route.
+    // Remove the weaker (A->C) path and compare — D should get strictly
+    // less energy when reachable through only the one remaining route.
     const singlePathDataDir = await mkdtemp(join(tmpdir(), "vnl-test-activation-single-"));
     await appendEvent(singlePathDataDir, "inst-1", event({ from: "A", to: "B", weight_delta: 10 }));
     await appendEvent(singlePathDataDir, "inst-1", event({ from: "B", to: "D", weight_delta: 10 }));
@@ -127,6 +132,7 @@ describe("activate (spreading activation)", () => {
     const dSingle = viaSinglePath.find((n) => n.path === "D")!;
 
     expect(d.energy).toBeGreaterThan(dSingle.energy);
+    expect(d.energy - dSingle.energy).toBeGreaterThan(0.1); // real margin, not floating-point noise
     await rm(singlePathDataDir, { recursive: true, force: true });
   });
 

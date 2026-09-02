@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { StructuralLinksFile } from "./types.js";
-import { createObsidianAdapter, type SourceAdapter } from "./adapters.js";
+import { createObsidianAdapter, type SourceAdapter, type SourceNode } from "./adapters.js";
 
 const STRUCTURAL_LINKS_FILE_VERSION = 1;
 const STRUCTURAL_LINKS_FILE_NAME = "structural-links.json";
@@ -19,8 +19,13 @@ const STRUCTURAL_LINKS_FILE_NAME = "structural-links.json";
 export async function buildStructuralIndex(
   vaultPath: string,
   adapter: SourceAdapter = createObsidianAdapter(vaultPath),
+  prebuiltNodes?: SourceNode[],
 ): Promise<StructuralLinksFile> {
-  const nodes = await adapter.listNodes();
+  // AIBRAIN-133: accepts an already-fetched node list so a caller building
+  // both this and the content index in the same pass (nightlyScheduler.ts)
+  // doesn't pay for adapter.listNodes() twice — at 300k-note scale that's a
+  // real, previously-measured cost (~17s, AIBRAIN-131), not a rounding error.
+  const nodes = prebuiltNodes ?? (await adapter.listNodes());
 
   const byPathLower = new Map<string, string>();
   const byTitleLower = new Map<string, string[]>();
