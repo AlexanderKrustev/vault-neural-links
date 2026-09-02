@@ -5,8 +5,8 @@ Jira (project AIBRAIN) stays the actual backlog per this repo's CLAUDE.md —
 this file exists so "what's going on" doesn't require reading 15 Jira
 tickets and a vault note to answer.
 
-**Direction, confirmed by you**: keep hardening retrieval quality before
-shifting to installability/packaging.
+**Direction, confirmed by you**: retrieval hardening (done), then
+installability/packaging (in progress — see bottom of this file).
 
 ## What happened today, in order
 
@@ -48,9 +48,37 @@ shifting to installability/packaging.
    down to still-29,000 candidates doesn't save much. Filed that as
    AIBRAIN-142 rather than hiding it. Fixed, tested, shipped (`1b6c11b`).
 
+9. **Shipped installability/packaging** (AIBRAIN-40, 41, 44 done; 42 In
+   Review) — the actual code/config work to make `npx -y
+   @vault-neural-links/mcp-server` work, once published:
+   - `LICENSE`, version bumped to 0.1.0, npm publish metadata.
+   - Fixed a real bug found while doing this: `mcp-server` depended on
+     `core` in a way that only worked inside this repo's own workspace —
+     anyone installing `mcp-server` standalone would have gotten an error.
+     Fixed by bundling `core` straight into `mcp-server`'s build. Verified
+     for real: packed it, installed the package into a totally separate
+     project, ran it — worked cleanly.
+   - Set up automatic versioning/changelogs (Changesets) and a GitHub
+     Actions workflow that builds, tests, and publishes on merge.
+   - Rewrote README/INSTALL to lead with the one-line install, honestly
+     labeled "not live yet" until the two steps below happen — the
+     git-clone method that works today is kept right underneath it.
+   - Closed an old duplicate ticket (AIBRAIN-53) asking for the same thing.
+
 **Net effect: the tool is measurably more reliable right now than it was
 this morning**, and every fix has a real before/after number behind it.
-**The three-item retrieval-hardening plan (AIBRAIN-141 → 133) is done.**
+**The three-item retrieval-hardening plan (AIBRAIN-141 → 133) is done, and
+the packaging code is ready — it just needs two things only you can do.**
+
+## Two things only you can do to finish this
+
+1. **Create an npm access token** and add it as this repo's `NPM_TOKEN`
+   GitHub Actions secret (npmjs.com → Access Tokens → "Automation" type →
+   GitHub → repo Settings → Secrets and variables → Actions). Without
+   this, nothing can actually publish — I can't create this myself, it's
+   tied to your identity.
+2. **Submit the Obsidian plugin to the community store** — a separate
+   manual process (their own review queue), not started.
 
 ## Pending — in priority order
 
@@ -65,20 +93,12 @@ Real but low-priority: only shows up on the synthetic 300k-note test
 fixture's own oddly-repetitive made-up words, not observed against this
 real vault. Not urgent.
 
-### 3. Stale docs
-- `README.md` documents 9 of the 11 tools that actually exist.
+### 3. Remaining stale docs
 - `docs/spec.md` still describes an old design ("no MCP, no server") that
   was abandoned early on.
 - Your global `CLAUDE.md` still has a note about `log_traversal` that
   contradicts what the tool actually does now.
-
-### A decision point for you
-The retrieval-hardening plan you asked to keep going is now done — three
-real bugs found and fixed today (AIBRAIN-130, 138, 139, 141, 133), each
-with a before/after number. What's left (1–3 above) is smaller and lower
-priority than what you already asked for. Worth deciding now: keep going
-on retrieval polish, or shift toward installability/packaging (item 3
-above, plus the one-line install work in AIBRAIN-39)?
+- (README's own staleness — missing tools in its table — is fixed now.)
 
 ### Everything NOT touched, deliberately paused
 - **AIBRAIN-63** (standalone desktop app) — paused since 2026-08-30,
