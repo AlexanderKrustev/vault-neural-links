@@ -1,0 +1,63 @@
+name: Release
+
+# AIBRAIN-42: on every push to main with pending changesets (files under
+# .changeset/, see .changeset/README.md for the workflow), the changesets
+# bot opens/updates a "Version Packages" PR. Merging that PR removes the
+# changeset files, which is what tells this same workflow to build, test,
+# and publish instead of opening another version PR.
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build core + mcp-server
+        run: npm run build
+
+      - name: Test core + mcp-server
+        run: npm test --workspace=packages/core --workspace=packages/mcp-server
+
+      - name: Create release PR or publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: npm run version-packages
+          publish: npm run release
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AIBRAIN-42: manual one-time prerequisite, not automatable from
+          # here — create an npm access token (npmjs.com -> Access Tokens,
+          # "Automation" type so it works non-interactively) with publish
+          # rights on the @vault-neural-links scope, then add it as a
+          # repository secret named NPM_TOKEN (Settings -> Secrets and
+          # variables -> Actions). Without it, the version-PR step above
+          # still works; only the actual `npm publish` step will fail.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

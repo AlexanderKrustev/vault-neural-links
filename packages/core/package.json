@@ -1,7 +1,16 @@
 {
   "name": "@vault-neural-links/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Headless weighted-link engine for an Obsidian vault",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexanderKrustev/vault-neural-links.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

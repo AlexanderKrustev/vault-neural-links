@@ -33,6 +33,12 @@ now, not just what's technically connected.
   edge weight up; unused edges decay over time (30-day half-life by
   default). `get_weighted_neighbors` ranks by this weight, not just link
   count.
+- **Spreading activation** — `activate` follows that weighted graph
+  outward across multiple hops, so a note only indirectly connected
+  through an intermediate note can still surface.
+- **Fast at scale** — a persisted content index and structural index mean
+  search and retrieval don't re-scan the whole vault on every call;
+  verified against a 300,000-note vault, not just small ones.
 - **Plain-text audit trail** — every write appends a human-readable line to
   `changes.jsonl`. No git dependency — your vault doesn't need to be a git
   repo for any of this to work.
@@ -41,6 +47,21 @@ now, not just what's technically connected.
   folder and you're back to a plain Obsidian vault.
 
 ## Install
+
+```bash
+claude mcp add vault-neural-link --scope user \
+  -- npx -y @vault-neural-links/mcp-server
+```
+
+> **Not yet published to npm.** The command above is the intended
+> one-line install once `@vault-neural-links/mcp-server` has its first
+> release (tracked in AIBRAIN-39/42) — publishing needs a one-time manual
+> step (an npm access token added to this repo's GitHub Actions secrets)
+> that hasn't happened yet. Until then, use the build-from-source install
+> below; it works today.
+
+<details>
+<summary>Build from source (works today)</summary>
 
 ```bash
 git clone <this-repo> path/to/vault-neural-link
@@ -53,8 +74,10 @@ claude mcp add vault-neural-link --scope user \
   -- node path/to/vault-neural-link/packages/mcp-server/dist/index.js
 ```
 
-Set `CLAUDE_VAULT_PATH` to your vault's root before starting a session —
-that's the only required configuration:
+</details>
+
+Either way, set `CLAUDE_VAULT_PATH` to your vault's root before starting a
+session — that's the only required configuration:
 
 ```bash
 export CLAUDE_VAULT_PATH="/path/to/your/vault"
@@ -68,6 +91,10 @@ vault, and it will use these tools automatically.
 The `packages/obsidian-plugin` workspace adds a "Neural Graph" view to
 Obsidian that visualizes the same weighted-link data as a force-directed
 graph. It's optional — the MCP server works standalone.
+
+Not yet submitted to the Obsidian community plugin store (tracked in
+AIBRAIN-39, a manual review process once submitted) — for now, build it
+yourself:
 
 ```bash
 npm run build --workspace=packages/obsidian-plugin
@@ -87,10 +114,12 @@ ribbon icon or the "Open Neural Graph" command.
 | `update_note` | Replace a note's body, or append text under a heading (e.g. `## Updates`) |
 | `read_note` | Read a note's parsed frontmatter and body |
 | `list_notes` | List note paths, optionally scoped to a folder |
-| `search_notes` | Search titles/aliases/content, optionally ranked by link weight |
-| `get_weighted_neighbors` | Get a note's most-used related notes |
+| `search_notes` | Search titles/aliases/content, tokenized and ranked by match relevance, then by link weight |
+| `get_weighted_neighbors` | Get a note's most-used related notes, one hop out |
+| `activate` | Spreading activation: follow the weighted graph outward across multiple hops from one note |
+| `ablation_diff` | Compare `activate`'s output with and without specific scoring layers, to see what each one contributes |
 | `get_edge_weight` | Get the current weight between two specific notes |
-| `log_traversal` | Record that a session followed a link from one note to another |
+| `log_traversal` | Manual override for crediting an edge `read_note` couldn't have credited on its own (rare — see the tool's own description) |
 | `compact_weights` | Force-fold pending events into the weights file immediately |
 
 Reinforcement (boosting a link beyond ordinary read/traversal tracking) is
@@ -111,6 +140,12 @@ entirely.
 - **`packages/obsidian-plugin`** — an Obsidian plugin that visualizes the
   weighted-link graph as a force-directed layout, reading the same
   `.vault-neural-links/link-weights.json` the MCP server writes.
+- **`packages/render-core`** — the shared force-directed graph rendering
+  code behind the Obsidian plugin's view, extracted so it isn't tied to
+  Obsidian's own extension APIs.
+- **`packages/desktop-app`** — an experimental standalone Electron shell
+  (bundled MCP server, no Obsidian dependency). Paused; see that
+  package's own state before relying on it.
 
 ## Development
 
@@ -126,3 +161,11 @@ npm test --workspace=packages/mcp-server
 Runtime data (`.vault-neural-links/`) lives inside whichever vault you
 point `CLAUDE_VAULT_PATH` at, not in this repo — add it to that vault's
 `.gitignore` if you don't want the event logs tracked there.
+
+### Releasing (`packages/core` and `packages/mcp-server` only)
+
+Versioning and npm publishing for these two packages goes through
+[Changesets](https://github.com/changesets/changesets) — see
+`.changeset/README.md` for the day-to-day workflow, and
+`.github/workflows/release.yml` for what runs in CI. The Obsidian plugin
+ships separately, through the community store submission process, not npm.

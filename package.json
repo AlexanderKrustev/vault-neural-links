@@ -3,13 +3,19 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "build": "npm run build --workspace=packages/core && npm run build --workspace=packages/mcp-server"
+    "build": "npm run build --workspace=packages/core && npm run build --workspace=packages/mcp-server",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "npm run build && changeset publish"
   },
   "workspaces": [
     "packages/*"
   ],
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.1"
   },
   "allowScripts": {
     "esbuild@0.23.1": true,
