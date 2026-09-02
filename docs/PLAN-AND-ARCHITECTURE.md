@@ -7,7 +7,9 @@ This document has two parts:
 - **[Part 1 — Path to Market](#part-1--path-to-market)**: everything standing between today and a real, paid, publicly-listed product, organized into tracks with status, owner, and sequencing.
 - **[Part 2 — Architecture & Design Reference](#part-2--architecture--design-reference)**: how the system actually works today — packages, data model, every mechanism, the tool surface, and the design decisions behind them.
 
-Jira remains the source of truth for task status per this repo's `CLAUDE.md`; this document is a snapshot and a map, not a replacement for it. `docs/STATUS.md` is the shorter day-to-day version of Part 1's most recent slice.
+> **Superseded notice (2026-09-02).** Part 1 below is a historical snapshot of the paid-from-launch plan and its Jira tracks. It is **superseded by [`PLAN.md`](PLAN.md)**, which is now the single source of truth for tasks, sequencing and decisions (Jira project AIBRAIN is retired; export in [`BACKLOG-ARCHIVE.md`](BACKLOG-ARCHIVE.md)). Part 2 (architecture reference) remains current, with these corrections from the 2026-09-02 audit: the content index is a monolithic JSON parsed on every query (8.5 MB at 471 notes) and is slated for replacement (PLAN.md VNL-031); `computeLiveNeighborWeights` re-reads three files and scans every edge per call (VNL-030); path arguments are not contained to the vault (VNL-001); the compaction comment about live event files being left alone is incorrect (VNL-004). See `analysis/2026-09-02-deep-analysis-report.md`.
+
+Jira was the source of truth for task status when this was written; this document is a snapshot and a map. `docs/STATUS.md` is the shorter day-to-day version.
 
 ---
 
