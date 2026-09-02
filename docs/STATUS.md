@@ -5,6 +5,9 @@ Jira (project AIBRAIN) stays the actual backlog per this repo's CLAUDE.md —
 this file exists so "what's going on" doesn't require reading 15 Jira
 tickets and a vault note to answer.
 
+**Direction, confirmed by you**: keep hardening retrieval quality before
+shifting to installability/packaging.
+
 ## What happened today, in order
 
 1. **Full project audit.** Result: the retrieval engine works and beats
@@ -17,70 +20,48 @@ tickets and a vault note to answer.
    Both fixed, tested, shipped (`bc508f5`).
 3. **Found something bigger while checking that fix**: a plain, fixed
    text-search — no smart weighting, no AI mechanism — was now
-   outperforming the full engine (AIBRAIN-140). That sharpened the original
-   question from "is the usage tier miscalibrated" to "does the whole
-   reinforcement mechanism earn its complexity."
+   outperforming the full engine (AIBRAIN-140).
 4. **Root-caused and fixed the core issue** (AIBRAIN-130) — a note you'd
    just looked at could get permanently buried behind a generically
    popular note (something linked from everywhere), regardless of whether
    it was actually the answer to your question. Fixed, tested, shipped
-   (`be88d9b`).
-5. **Re-ran the benchmark after the fix**: the engine's rank-1 accuracy
-   went from 9/18 to 15/18 — it now clearly beats every simpler
-   alternative again, and for a reason we can explain instead of one we
-   have to trust.
+   (`be88d9b`). Engine's rank-1 accuracy went from 9/18 to 15/18.
+5. **Closed AIBRAIN-140** with the final numbers — the engine is back
+   ahead of plain text search (15/18 vs 13/18) now that both bugs are fixed.
+6. **Committed and pushed everything**, including desktop-app work
+   (AIBRAIN-131/132) that was sitting uncommitted before this session.
+7. **Fixed AIBRAIN-141** — the direct side effect of the AIBRAIN-130 fix:
+   priming now reliably wins its comparisons, so a note you looked at
+   early in a long session used to stay just as "primed" as one you
+   looked at a second ago, permanently outranking more relevant notes
+   until it fell out of a 20-note buffer. Now decays with time since the
+   touch (20-minute half-life, reusing the same decay math the rest of
+   the engine already uses). Fixed, tested, shipped (`ec709da`).
 
 **Net effect: the tool is measurably more reliable right now than it was
-this morning**, and there's a real number to point at.
-
-## Uncommitted work sitting in your working tree — not mine, not touched
-
-These were already modified before this session started and are still
-just sitting there, uncommitted:
-
-- `packages/desktop-app/renderer/index.html`
-- `packages/desktop-app/src/main.ts`
-- `packages/desktop-app/src/renderer.ts`
-- `packages/desktop-app/scripts/repro-search.mjs` (new, untracked)
-
-These look like your own AIBRAIN-131/132 work (desktop app crash fixes at
-300k-note scale). **Action needed from you**: either commit them, or tell
-me to look at them — right now they exist only on this machine and aren't
-part of any of the fixes above.
-
-## Done since this file was written
-
-- ~~Update AIBRAIN-140 with today's final numbers~~ — done. Commented with
-  the re-run (engine 15/18 vs grep 13/18, engine back ahead) and closed —
-  the comparison it was tracking is resolved, and AIBRAIN-130 (Done)
-  carries the permanent record.
+this morning**, and every fix has a real before/after number behind it.
 
 ## Pending — in priority order
 
-### 1. AIBRAIN-141 — priming has no memory of *when* something was touched
-Direct side effect of today's fix: priming now reliably wins its
-comparisons (that's the fix), which means a note you looked at early in a
-long session stays "primed" just as strongly as one you looked at a
-second ago, until it falls out of a 20-note buffer. Filed, not started.
-**Real design work, not a quick patch.**
-
-### 2. AIBRAIN-133 — search has no real index
+### 1. AIBRAIN-133 — search has no real index
 `search_notes` still reads and checks every single note in the vault on
 every query. Fine at ~470 notes (this vault), painfully slow at scale
 (300k-note test fixture: ~2 minutes per search). Epic exists, not started.
+**Next up.**
 
-### 3. Widen the benchmark past 18 queries
+### 2. Widen the benchmark past 18 queries
 The 18-query test set that's been driving all of today's numbers is small
 and was written by one person (you) testing their own notes. Good enough
-to catch real bugs (it did, twice, today) — not enough to make confident
-claims beyond that. No ticket yet.
+to catch real bugs (it did, three times, today) — not enough to make
+confident claims beyond that. No ticket yet.
 
-### 4. Stale docs
+### 3. Stale docs
 - `README.md` documents 9 of the 11 tools that actually exist.
 - `docs/spec.md` still describes an old design ("no MCP, no server") that
   was abandoned early on.
 - Your global `CLAUDE.md` still has a note about `log_traversal` that
   contradicts what the tool actually does now.
+- Lower priority than 1–2 per your call to keep hardening retrieval first.
 
 ### Everything NOT touched, deliberately paused
 - **AIBRAIN-63** (standalone desktop app) — paused since 2026-08-30,
@@ -93,11 +74,6 @@ claims beyond that. No ticket yet.
 - **AIBRAIN-137** (citation-token experiment) — still expected to fail the
   same way the old `reinforce_link` tool did (an agent has no real reason
   to call a second tool voluntarily). Not started, low priority.
-
-## One open question for you
-
-Given the engine now measurably works, is the priority still "keep making
-retrieval more correct" (items 1–4 above), or do you want to shift toward
-"make it installable/usable by someone who isn't you" (item 5, plus the
-one-line install work in AIBRAIN-39)? Both are legitimate next moves — I
-don't want to guess which one you actually want without asking.
+- **Installability/packaging** (AIBRAIN-39 one-line install, and item 3
+  above) — deliberately deferred until retrieval hardening (1–2) is
+  further along, per your direction.
