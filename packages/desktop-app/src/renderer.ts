@@ -15,6 +15,8 @@ interface FolderEdge {
 interface FolderSummary {
   folderPath: string;
   noteCount: number;
+  /** How many of `noteCount` are actually in `notes`/`edges` below — see main.ts's MAX_RENDERED_NOTES. */
+  renderedNoteCount: number;
   edgeCount: number;
   notes: { id: string; neighborCount: number }[];
   edges: FolderEdge[];
@@ -104,12 +106,39 @@ const mcpConnectCommandEl = document.getElementById("mcpConnectCommand")!;
 const copyMcpCommandBtn = document.getElementById("copyMcpCommandBtn") as HTMLButtonElement;
 
 const newNoteBtn = document.getElementById("newNoteBtn") as HTMLButtonElement;
+const loadingOverlay = document.getElementById("loadingOverlay")!;
+const loadingMessageEl = document.getElementById("loadingMessage")!;
 const editorOverlay = document.getElementById("editorOverlay")!;
 const editorPathInput = document.getElementById("editorPathInput") as HTMLInputElement;
 const editorBody = document.getElementById("editorBody") as HTMLTextAreaElement;
 const editorErrorEl = document.getElementById("editorError")!;
 const editorSaveBtn = document.getElementById("editorSaveBtn") as HTMLButtonElement;
 const editorCancelBtn = document.getElementById("editorCancelBtn") as HTMLButtonElement;
+
+let loadingTimer: ReturnType<typeof setInterval> | null = null;
+let loadingStartedAt = 0;
+
+// Full-screen overlay covering whichever screen is active, so a heavy folder
+// load (structural indexing + PageRank-for-capping, ~30s+ on a 300k-note
+// vault per AIBRAIN-131) reads as "working" instead of a frozen/blank app.
+function showLoading(message: string): void {
+  loadingStartedAt = Date.now();
+  loadingMessageEl.textContent = message;
+  loadingOverlay.classList.add("visible");
+  if (loadingTimer) clearInterval(loadingTimer);
+  loadingTimer = setInterval(() => {
+    const elapsedSec = Math.round((Date.now() - loadingStartedAt) / 1000);
+    loadingMessageEl.textContent = elapsedSec > 0 ? `${message} (${elapsedSec}s)` : message;
+  }, 1000);
+}
+
+function hideLoading(): void {
+  if (loadingTimer) {
+    clearInterval(loadingTimer);
+    loadingTimer = null;
+  }
+  loadingOverlay.classList.remove("visible");
+}
 
 function showApp() {
   setupScreen.style.display = "none";
@@ -160,16 +189,22 @@ async function attemptLogin() {
   loginErrorEl.textContent = "";
   loginBtn.disabled = true;
   loginBtn.textContent = "Waiting for browser…";
+  let result: LoginResult;
   try {
-    const result = await window.vnl.login();
-    if (result.ok) {
-      await enterAppOrSetup();
-    } else {
-      loginErrorEl.textContent = result.reason || "Login failed.";
-    }
+    result = await window.vnl.login();
   } finally {
+    // Reset as soon as the OAuth exchange itself settles, not after
+    // enterAppOrSetup() — that call can also run the full folder
+    // load/indexing (loadAndShowFolder's own showLoading overlay covers
+    // that phase), which used to leave this button stuck on "Waiting for
+    // browser…" for the whole load even though login had long finished.
     loginBtn.disabled = false;
     loginBtn.textContent = "Log in with browser";
+  }
+  if (result.ok) {
+    await enterAppOrSetup();
+  } else {
+    loginErrorEl.textContent = result.reason || "Login failed.";
   }
 }
 
@@ -322,9 +357,23 @@ async function doSearch(): Promise<void> {
   if (!currentFolderPath) return;
   const query = searchInput.value.trim();
   if (!query) return;
-  const hits = await window.vnl.search(currentFolderPath, query);
-  renderSearchResults(hits);
-  await refreshPrimed();
+
+  // A vault-wide content scan (no index covers note bodies) can take real
+  // time against a large vault even after AIBRAIN-133's batching fix — with
+  // no feedback here, a slow-but-working search was indistinguishable from
+  // a hung one. Mirrors the folder-load overlay's "show something" approach,
+  // scoped to just the search UI instead of the whole screen.
+  searchBtn.disabled = true;
+  searchBtn.textContent = "Searching…";
+  searchResultsEl.innerHTML = "<li>Searching…</li>";
+  try {
+    const hits = await window.vnl.search(currentFolderPath, query);
+    renderSearchResults(hits);
+    await refreshPrimed();
+  } finally {
+    searchBtn.disabled = false;
+    searchBtn.textContent = "Search";
+  }
 }
 
 searchBtn.addEventListener("click", () => void doSearch());
@@ -344,7 +393,8 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opt
   currentSourceType = sourceType;
   folderPathEl.textContent = `${folderPath}  (${sourceType === "obsidian" ? "Obsidian vault" : "OKF folder"})`;
   summaryEl.innerHTML = "";
-  notesEl.innerHTML = "<li>Loading…</li>";
+  notesEl.innerHTML = "";
+  showLoading("Indexing and visualizing your vault…");
 
   try {
     const result = await window.vnl.loadFolder(folderPath, sourceType);
@@ -353,6 +403,12 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opt
     summaryEl.innerHTML = "";
     summaryEl.appendChild(stat(result.noteCount, "notes"));
     summaryEl.appendChild(stat(result.edgeCount, "edges"));
+    if (result.renderedNoteCount < result.noteCount) {
+      const capNote = document.createElement("div");
+      capNote.className = "cap-note";
+      capNote.textContent = `Showing top ${result.renderedNoteCount} of ${result.noteCount} notes by importance — search and activation still cover all of them.`;
+      summaryEl.appendChild(capNote);
+    }
 
     notesEl.innerHTML = "";
     for (const note of result.notes) {
@@ -381,6 +437,8 @@ async function loadAndShowFolder(folderPath: string, sourceType: SourceType, opt
     notesEl.innerHTML = "";
     showSetup();
     setupErrorEl.textContent = `Couldn't load "${folderPath}": ${message}`;
+  } finally {
+    hideLoading();
   }
 }
 

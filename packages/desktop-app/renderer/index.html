@@ -14,6 +14,7 @@
       .stat { background: #1e2127; border-radius: 8px; padding: 10px 16px; }
       .stat .n { font-size: 22px; font-weight: 600; }
       .stat .label { font-size: 11px; color: #9aa0a6; text-transform: uppercase; letter-spacing: 0.04em; }
+      .cap-note { color: #9aa0a6; font-size: 12px; align-self: center; }
       ul { list-style: none; padding: 0; margin: 16px 0 0; max-height: 420px; overflow-y: auto; }
       li { display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #22262e; font-size: 13px; }
       li span.count { color: #9aa0a6; }
@@ -89,9 +90,19 @@
       #mcpConnectRow { display: flex; gap: 8px; margin-top: 10px; }
       #mcpConnectCommand { flex: 1; background: #14161a; border: 1px solid #2c3038; color: #cbd0d8; border-radius: 6px; padding: 8px 10px; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-x: auto; white-space: pre; }
       #copyMcpCommandBtn { flex-shrink: 0; }
+
+      #loadingOverlay { display: none; position: fixed; inset: 0; background: rgba(20,22,26,0.92); align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 20; }
+      #loadingOverlay.visible { display: flex; }
+      #loadingOverlay .spinner { width: 40px; height: 40px; border: 3px solid #2c3038; border-top-color: #3b6ef2; border-radius: 50%; animation: vnl-spin 0.8s linear infinite; }
+      #loadingMessage { font-size: 13px; color: #cbd0d8; }
+      @keyframes vnl-spin { to { transform: rotate(360deg); } }
     </style>
   </head>
   <body>
+    <div id="loadingOverlay">
+      <div class="spinner"></div>
+      <div id="loadingMessage">Loading…</div>
+    </div>
     <section id="setupScreen">
       <h1>Get started</h1>
       <p class="sub">Point Vault Neural Links at where your notes live.</p>

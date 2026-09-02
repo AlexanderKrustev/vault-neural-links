@@ -18,6 +18,7 @@ import {
   rebuildStructuralIndex,
   initInstance,
   searchNotes,
+  computePageRank,
   readNote,
   writeNoteWithAutoLink,
   resolveDataDir,
@@ -108,24 +109,53 @@ function getSession(folderPath: string): EngineSession {
 interface FolderSummary {
   folderPath: string;
   noteCount: number;
+  /** How many of `noteCount` are actually present in `notes`/`edges` below — see MAX_RENDERED_NOTES. */
+  renderedNoteCount: number;
   edgeCount: number;
   notes: { id: string; neighborCount: number }[];
   /** Deduped undirected edge list (each pair once, not both directions) — for the renderer's ForceSim/Renderer graph. */
   edges: { source: string; target: string }[];
 }
 
+// The note list (one <li> per note) and ForceSim graph are both unbounded,
+// synchronous renders — neither is built for more than a few thousand
+// nodes. Confirmed live against sample-okf-large (300k OKF notes,
+// AIBRAIN-108's scale corpus): the renderer froze for minutes building
+// 300k list items, then choked handing 300k nodes to ForceSim. The
+// structural-index build itself already handles 300k fine (AIBRAIN-118);
+// this cap is purely about what gets rendered, not what's indexed or
+// retrievable — search/activate below query the full on-disk index
+// unaffected by this cap.
+const MAX_RENDERED_NOTES = 500;
+
 function summarize(folderPath: string, index: StructuralLinksFile, noteIds: string[]): FolderSummary {
-  const notes = noteIds
+  const totalEdgeCount = Object.values(index.edges).reduce((sum, n) => sum + n.length, 0) / 2;
+
+  let renderIds = noteIds;
+  if (noteIds.length > MAX_RENDERED_NOTES) {
+    // Rank by the same PageRank importance score the graph's radial-star
+    // layout already uses elsewhere, computed directly off the index
+    // already in hand — no extra disk read, and consistent with what
+    // "important" means everywhere else in the app.
+    const scores = computePageRank(index);
+    renderIds = [...noteIds].sort((a, b) => (scores[b] ?? 0) - (scores[a] ?? 0)).slice(0, MAX_RENDERED_NOTES);
+  }
+
+  const notes = renderIds
     .map((id) => ({ id, neighborCount: index.edges[id]?.length ?? 0 }))
     .sort((a, b) => a.id.localeCompare(b.id));
-  const edgeCount = Object.values(index.edges).reduce((sum, n) => sum + n.length, 0) / 2;
 
   // buildStructuralIndex's adjacency is undirected but stored both ways
-  // (a->b and b->a) — dedup to one pair per edge for the renderer.
+  // (a->b and b->a) — dedup to one pair per edge for the renderer. Only
+  // edges between two rendered notes make sense to draw; an edge to a
+  // note outside the capped set would be a dangling reference in the graph.
+  const renderSet = new Set(renderIds);
   const seen = new Set<string>();
   const edges: { source: string; target: string }[] = [];
   for (const [source, neighbors] of Object.entries(index.edges)) {
+    if (!renderSet.has(source)) continue;
     for (const target of neighbors) {
+      if (!renderSet.has(target)) continue;
       const key = source < target ? `${source}|${target}` : `${target}|${source}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -133,7 +163,7 @@ function summarize(folderPath: string, index: StructuralLinksFile, noteIds: stri
     }
   }
 
-  return { folderPath, noteCount: noteIds.length, edgeCount, notes, edges };
+  return { folderPath, noteCount: noteIds.length, renderedNoteCount: notes.length, edgeCount: totalEdgeCount, notes, edges };
 }
 
 function createWindow(): void {
