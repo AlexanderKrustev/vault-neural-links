@@ -48,40 +48,41 @@ These look like your own AIBRAIN-131/132 work (desktop app crash fixes at
 me to look at them — right now they exist only on this machine and aren't
 part of any of the fixes above.
 
+## Done since this file was written
+
+- ~~Update AIBRAIN-140 with today's final numbers~~ — done. Commented with
+  the re-run (engine 15/18 vs grep 13/18, engine back ahead) and closed —
+  the comparison it was tracking is resolved, and AIBRAIN-130 (Done)
+  carries the permanent record.
+
 ## Pending — in priority order
 
-### 1. Update AIBRAIN-140 with today's final numbers
-It was filed this morning saying "grep beats the engine" (13/18 vs 9/18).
-That's now stale — after the AIBRAIN-130 fix, the engine is back ahead
-(15/18 vs 13/18). Needs a comment so the ticket isn't misleading. **Small,
-five minutes.**
-
-### 2. AIBRAIN-141 — priming has no memory of *when* something was touched
+### 1. AIBRAIN-141 — priming has no memory of *when* something was touched
 Direct side effect of today's fix: priming now reliably wins its
 comparisons (that's the fix), which means a note you looked at early in a
 long session stays "primed" just as strongly as one you looked at a
 second ago, until it falls out of a 20-note buffer. Filed, not started.
 **Real design work, not a quick patch.**
 
-### 3. AIBRAIN-133 — search has no real index
+### 2. AIBRAIN-133 — search has no real index
 `search_notes` still reads and checks every single note in the vault on
 every query. Fine at ~470 notes (this vault), painfully slow at scale
 (300k-note test fixture: ~2 minutes per search). Epic exists, not started.
 
-### 4. Widen the benchmark past 18 queries
+### 3. Widen the benchmark past 18 queries
 The 18-query test set that's been driving all of today's numbers is small
 and was written by one person (you) testing their own notes. Good enough
 to catch real bugs (it did, twice, today) — not enough to make confident
 claims beyond that. No ticket yet.
 
-### 5. Stale docs
+### 4. Stale docs
 - `README.md` documents 9 of the 11 tools that actually exist.
 - `docs/spec.md` still describes an old design ("no MCP, no server") that
   was abandoned early on.
 - Your global `CLAUDE.md` still has a note about `log_traversal` that
   contradicts what the tool actually does now.
 
-### 6. Everything NOT touched, deliberately paused
+### Everything NOT touched, deliberately paused
 - **AIBRAIN-63** (standalone desktop app) — paused since 2026-08-30,
   correctly so: no point polishing a UI on top of a retrieval engine that
   wasn't proven to work yet. Worth revisiting now that it's proven, but
