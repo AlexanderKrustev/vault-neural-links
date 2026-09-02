@@ -460,3 +460,50 @@ describe("AIBRAIN-130: primed neighbor beats a stronger unprimed hub", () => {
     expect(neighbors[0].path).toBe("Hub");
   });
 });
+
+// AIBRAIN-141: AIBRAIN-130's fix floors a primed neighbor above the
+// strongest unprimed competitor, but buffer membership itself used to be
+// binary — a touch from the very start of a long session stayed at full
+// priming strength forever (until LRU eviction), which meant it would go
+// on permanently outranking a genuinely stronger unrelated hub long after
+// the session had moved on to a different topic. primingBonus() now
+// decays with time since the touch, and computeLiveNeighborWeights
+// interpolates the AIBRAIN-130 floor by how much of that bonus remains.
+describe("AIBRAIN-141: priming's force-rank fades as the touch grows stale", () => {
+  let dataDir: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-priming-decay-data-"));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("a note touched many priming half-lives ago no longer force-outranks a stronger unprimed hub", async () => {
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Hub", weight_delta: 9 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Target", weight_delta: 1 }));
+    await compact(dataDir);
+
+    // Default halfLifeMinutes is 20; touching 3 hours (9 half-lives) in the
+    // past leaves the bonus at roughly bonus/512 — negligible.
+    const buffer = new SessionBuffer();
+    buffer.touch("Target", new Date(Date.now() - 3 * 60 * 60 * 1000));
+
+    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer);
+    // Back to ranking exactly like an unprimed neighbor: Hub's real weight wins.
+    expect(neighbors[0].path).toBe("Hub");
+  });
+
+  it("a note touched moments ago still force-outranks a stronger unprimed hub (AIBRAIN-130 behavior intact)", async () => {
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Hub", weight_delta: 9 }));
+    await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Target", weight_delta: 1 }));
+    await compact(dataDir);
+
+    const buffer = new SessionBuffer();
+    buffer.touch("Target");
+
+    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer);
+    expect(neighbors[0].path).toBe("Target");
+  });
+});

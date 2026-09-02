@@ -9,7 +9,7 @@ import type {
   StructuralFallbackConfig,
   WeightedNeighbor,
 } from "./types.js";
-import { DEFAULT_ABLATION_LAYERS, DEFAULT_IMPORTANCE_CONFIG, DEFAULT_STRUCTURAL_FALLBACK_CONFIG } from "./types.js";
+import { DEFAULT_ABLATION_LAYERS, DEFAULT_IMPORTANCE_CONFIG, DEFAULT_PRIMING_CONFIG, DEFAULT_STRUCTURAL_FALLBACK_CONFIG } from "./types.js";
 import { decayWeight, resolveHalfLifeDays } from "./decay.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { loadNoteImportance } from "./importance.js";
@@ -189,12 +189,25 @@ export async function computeLiveNeighborWeights(
   const unprimedMax = unprimedFinal.length > 0 ? Math.max(...unprimedFinal) : 0;
   const PRIMING_WIN_MARGIN = 0.01;
 
+  // AIBRAIN-141: the floor above used to apply in full the instant a note
+  // entered the buffer and stayed in full until LRU eviction — buffer
+  // membership was binary. primingBonus() now decays with time since the
+  // touch (see priming.ts), so the floor is interpolated by how much of
+  // that bonus remains: `strength` 1.0 (just touched) applies the floor in
+  // full, same as before this ticket; strength decaying toward 0 fades the
+  // note back down to its own bare (unboosted) weight — i.e. back to
+  // ranking exactly like an unprimed neighbor once priming has genuinely
+  // worn off, instead of an eviction-cliff staying at full strength until
+  // the buffer happens to fill up.
   const neighbors: WeightedNeighbor[] = candidates.map((c) => {
+    const bareWeight = withImportance(c.path, c.baseWeight);
     if (!primed(c.path)) {
-      return { path: c.path, weight: withImportance(c.path, c.baseWeight), lastTouched: c.lastTouched, source: c.source };
+      return { path: c.path, weight: bareWeight, lastTouched: c.lastTouched, source: c.source };
     }
-    const ownWeight = withImportance(c.path, c.baseWeight + primingBonus(c.path, sessionBuffer!));
-    const weight = Math.max(ownWeight, unprimedMax + PRIMING_WIN_MARGIN);
+    const bonus = primingBonus(c.path, sessionBuffer!, DEFAULT_PRIMING_CONFIG, now);
+    const strength = DEFAULT_PRIMING_CONFIG.bonus > 0 ? bonus / DEFAULT_PRIMING_CONFIG.bonus : 0;
+    const fullFloorWeight = Math.max(withImportance(c.path, c.baseWeight + bonus), unprimedMax + PRIMING_WIN_MARGIN);
+    const weight = bareWeight + strength * (fullFloorWeight - bareWeight);
     return { path: c.path, weight, lastTouched: c.lastTouched, source: c.source };
   });
 

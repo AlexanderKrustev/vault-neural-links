@@ -106,17 +106,32 @@ export const DEFAULT_NOTE_TYPE_DECAY_CONFIG: NoteTypeDecayConfig = {
 
 /**
  * Controls the session-scoped priming buffer: how many recently-accessed
- * notes it remembers, and how much weight bonus a note in the buffer gets
- * during retrieval.
+ * notes it remembers, how much weight bonus a note in the buffer gets
+ * during retrieval, and how fast that bonus decays with time since it was
+ * touched (AIBRAIN-141) — buffer *membership* alone used to be treated as
+ * binary (touched vs not), so a note touched at the start of a long
+ * session stayed exactly as "primed" as one touched a second ago, right up
+ * until LRU eviction. Reuses decay.ts's existing exponential half-life
+ * decay (see priming.ts's primingBonus) rather than inventing a new curve.
  */
 export interface PrimingConfig {
   bufferSize: number;
   bonus: number;
+  /**
+   * Half-life, in minutes, for the priming bonus's decay since the note
+   * was last touched. 20 minutes is a first cut, not measured against real
+   * session data: short enough that a session's focus genuinely moving on
+   * stops force-ranking stale touches within roughly an hour (3 half-lives
+   * ~= 1/8 strength), long enough that a note read a few minutes ago for
+   * the same task still gets its full intended effect.
+   */
+  halfLifeMinutes: number;
 }
 
 export const DEFAULT_PRIMING_CONFIG: PrimingConfig = {
   bufferSize: 20,
   bonus: 2,
+  halfLifeMinutes: 20,
 };
 
 
