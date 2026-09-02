@@ -88,4 +88,55 @@ describe("notes", () => {
     const hits = await searchNotes(vaultPath, "Old ADR", { useWeights: false });
     expect(hits.find((h) => h.path === "Old ADR")!.supersededBy).toBe("New ADR");
   });
+
+  // AIBRAIN-138: a query used to be one literal contiguous substring, so
+  // words present in the note but not contiguous (or out of order) returned
+  // no hits at all — indistinguishable from the note not existing.
+  it("searchNotes finds a note by tokens that are all present but not contiguous or in order", async () => {
+    await writeNote(vaultPath, "MCP Tool Decision-Delegation Audit and Deterministic Logging Plan", {
+      frontmatter: {},
+      body: "audit of tool decisions",
+    });
+
+    const hits = await searchNotes(vaultPath, "decision delegation audit deterministic logging", {
+      useWeights: false,
+    });
+    expect(hits.map((h) => h.path)).toContain(
+      "MCP Tool Decision-Delegation Audit and Deterministic Logging Plan",
+    );
+  });
+
+  it("searchNotes returns nothing when only some query tokens are present", async () => {
+    await writeNote(vaultPath, "Unrelated Note", { frontmatter: {}, body: "nothing to do with it" });
+
+    const hits = await searchNotes(vaultPath, "decision delegation audit deterministic logging", {
+      useWeights: false,
+    });
+    expect(hits).toEqual([]);
+  });
+
+  // AIBRAIN-139: ranking used to be `weight` alone, so an exact title match
+  // could rank behind an unrelated note that merely mentioned the query text
+  // in passing, if that note had more accumulated usage weight.
+  it("searchNotes ranks an exact title match above a heavier-weighted incidental content mention", async () => {
+    await writeNote(vaultPath, "Notes/Target Note", { frontmatter: {}, body: "the actual answer" });
+    await writeNote(vaultPath, "Notes/Unrelated Hub", {
+      frontmatter: {},
+      body: "in passing, this mentions Target Note without being about it",
+    });
+
+    const hits = await searchNotes(vaultPath, "Target Note", { useWeights: false });
+    expect(hits[0].path).toBe("Notes/Target Note");
+    expect(hits[0].matched).toBe("title");
+  });
+
+  it("searchNotes lets a small usage-weight difference break ties within the same match tier, never across tiers", async () => {
+    await writeNote(vaultPath, "Notes/A Content Match", { frontmatter: {}, body: "mentions widget once" });
+    await writeNote(vaultPath, "Notes/Widget", { frontmatter: {}, body: "widget widget widget" });
+
+    // Without weights: exact title match ("Widget") beats a content-only match.
+    const hits = await searchNotes(vaultPath, "widget", { useWeights: false });
+    expect(hits[0].path).toBe("Notes/Widget");
+    expect(hits[0].score).toBeGreaterThan(hits[1].score);
+  });
 });
