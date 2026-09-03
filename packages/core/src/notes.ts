@@ -22,6 +22,9 @@ const WEIGHT_SCORE_CONCURRENCY = 25;
 // again at very high concurrency). A real fix needs a persisted content
 // index, tracked separately rather than tuned here (AIBRAIN-133 follow-up).
 const CONTENT_SCAN_CONCURRENCY = 250;
+// Default batch size for readNotesInBatches — matches the adapter's own
+// listNodes() batching, which this replaced.
+const NOTE_READ_CONCURRENCY = 64;
 
 export interface NoteRef {
   path: string; // vault-relative, without .md extension
@@ -55,6 +58,34 @@ export async function readNote(vaultPath: string, notePath: string): Promise<Not
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
+}
+
+/**
+ * Bounded-concurrency read of many notes, one slot per path in the result
+ * (null where the note is missing or unreadable). At real vault scale a
+ * sequential loop is invisible; at 300k notes it is tens of minutes of pure
+ * I/O latency with the CPU idle. Batches rather than one `Promise.all` over
+ * every path, so no caller can try to hold hundreds of thousands of file
+ * descriptors open at once — the EMFILE shape already fixed in search
+ * (AIBRAIN-132) and, via this helper, in the auto-link scan (VNL-012).
+ *
+ * Fails open per note: one locked or corrupt file elsewhere in the vault —
+ * a transient OneDrive sync conflict, say — must not abort the caller's
+ * whole pass.
+ */
+export async function readNotesInBatches(
+  vaultPath: string,
+  notePaths: string[],
+  concurrency: number = NOTE_READ_CONCURRENCY,
+): Promise<(NoteRef | null)[]> {
+  const results: (NoteRef | null)[] = [];
+  for (let i = 0; i < notePaths.length; i += concurrency) {
+    const batch = notePaths.slice(i, i + concurrency);
+    results.push(
+      ...(await Promise.all(batch.map((path) => readNote(vaultPath, path).catch(() => null)))),
+    );
+  }
+  return results;
 }
 
 export interface WriteNoteResult {

@@ -1,5 +1,5 @@
 import { extractWikilinks } from "./parser.js";
-import { listNotes, readNote, writeNote } from "./notes.js";
+import { listNotes, readNotesInBatches, writeNote } from "./notes.js";
 import { appendChangelogEntry } from "./changelog.js";
 
 const RELATED_HEADING = "## Related (auto-linked)";
@@ -38,27 +38,24 @@ export async function autoLinkScan(
 ): Promise<AutoLinkResult> {
   const allPaths = await listNotes(vaultPath);
 
-  // Read all candidate notes concurrently, and fail open per-note (a
-  // locked/unreadable file elsewhere in the vault — e.g. a transient
-  // OneDrive sync conflict — must not block writing the current note,
-  // same as the PowerShell hook it replaces).
+  // Read candidate notes in bounded-concurrency batches, and fail open
+  // per-note (a locked/unreadable file elsewhere in the vault — e.g. a
+  // transient OneDrive sync conflict — must not block writing the current
+  // note, same as the PowerShell hook it replaces; it stays usable as a
+  // title-only candidate). The unbounded `Promise.all` this used to be was
+  // the same EMFILE pattern already fixed in search: one note written to a
+  // large vault opened every other note at once (VNL-012).
   //
   // The note being written is included here even though it can never be a
   // candidate: its own title and aliases still have to be counted when
   // deciding which terms are ambiguous below.
-  const candidates: Candidate[] = await Promise.all(
-    allPaths.map(async (path) => {
-      const title = path.split("/").pop() ?? path;
-      let aliases: string[] = [];
-      try {
-        const note = await readNote(vaultPath, path);
-        aliases = note && Array.isArray(note.frontmatter.aliases) ? (note.frontmatter.aliases as string[]) : [];
-      } catch {
-        // Unreadable note — still usable as a title-only candidate.
-      }
-      return { path, title, terms: [title, ...aliases] };
-    }),
-  );
+  const notes = await readNotesInBatches(vaultPath, allPaths);
+  const candidates: Candidate[] = allPaths.map((path, i) => {
+    const title = path.split("/").pop() ?? path;
+    const note = notes[i];
+    const aliases = note && Array.isArray(note.frontmatter.aliases) ? (note.frontmatter.aliases as string[]) : [];
+    return { path, title, terms: [title, ...aliases] };
+  });
 
   // A term is only linkable when it identifies exactly one note, mirroring
   // the rule buildStructuralIndex() already applies to hand-written

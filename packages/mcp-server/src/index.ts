@@ -1,23 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { removeInstanceFiles } from "@vault-neural-links/core";
 import { startActivationSocketServer } from "./activationSocket.js";
-import {
-  ablationDiffTool,
-  activateTool,
-  compactWeightsTool,
-  createNoteTool,
-  getEdgeWeightTool,
-  getWeightedNeighborsTool,
-  listNotesTool,
-  logTraversalTool,
-  makeToolContext,
-  readNoteTool,
-  searchNotesTool,
-  updateNoteTool,
-} from "./tools.js";
+import { createMcpServer } from "./server.js";
+import { makeToolContext } from "./tools.js";
 
 const vaultPath = process.env.CLAUDE_VAULT_PATH;
 if (!vaultPath) {
@@ -75,28 +62,6 @@ process.stdin.on("end", () => {
   void shutdown();
 });
 
-// VNL-005: report the real published version rather than a hardcoded 0.0.0.
-// `dist/index.js` and `src/index.ts` are both one directory below the package
-// root, so the same relative path works for the bundle and for tests.
-const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
-
-const server = new McpServer({
-  name: "vault-neural-link",
-  version,
-});
-
-server.registerTool(getWeightedNeighborsTool.name, getWeightedNeighborsTool.config, getWeightedNeighborsTool.handler(ctx));
-server.registerTool(activateTool.name, activateTool.config, activateTool.handler(ctx));
-server.registerTool(ablationDiffTool.name, ablationDiffTool.config, ablationDiffTool.handler(ctx));
-server.registerTool(getEdgeWeightTool.name, getEdgeWeightTool.config, getEdgeWeightTool.handler(ctx));
-server.registerTool(logTraversalTool.name, logTraversalTool.config, logTraversalTool.handler(ctx));
-// reinforce_link removed (AIBRAIN-66/AIBRAIN-69 follow-up) — see tools.ts's
-// comment at the former reinforceLinkTool location for why.
-server.registerTool(compactWeightsTool.name, compactWeightsTool.config, compactWeightsTool.handler(ctx));
-server.registerTool(createNoteTool.name, createNoteTool.config, createNoteTool.handler(ctx));
-server.registerTool(updateNoteTool.name, updateNoteTool.config, updateNoteTool.handler(ctx));
-server.registerTool(readNoteTool.name, readNoteTool.config, readNoteTool.handler(ctx));
-server.registerTool(listNotesTool.name, listNotesTool.config, listNotesTool.handler(ctx));
-server.registerTool(searchNotesTool.name, searchNotesTool.config, searchNotesTool.handler(ctx));
+const server = createMcpServer(ctx);
 
 await server.connect(new StdioServerTransport());

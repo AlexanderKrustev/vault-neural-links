@@ -13,7 +13,7 @@
  * AI-inference pass that ticket describes instead.
  */
 import { extractWikilinks, extractOkfLinks } from "./parser.js";
-import { listNotes, readNote } from "./notes.js";
+import { listNotes, readNotesInBatches } from "./notes.js";
 
 export interface SourceNode {
   /** Canonical identifier — a vault-relative path for Obsidian, a page ID/URL for another source. */
@@ -39,32 +39,21 @@ export interface SourceAdapter {
 }
 
 /** Reference implementation: Obsidian's markdown files + `[[wikilinks]]`. */
-const READ_CONCURRENCY = 64;
 
 /**
- * Reads notes in bounded-concurrency batches instead of one at a time.
- * At real vault scale (hundreds of notes) a plain sequential
- * `for (path of paths) await readNote(...)` loop is invisible; at
- * synthetic at-scale corpora (hundreds of thousands of notes, AIBRAIN-118)
- * it turns into tens of minutes of pure per-file I/O round-trip latency
- * with the CPU sitting idle the whole time — confirmed against a
- * 300k-note synthetic corpus, where the old sequential version hadn't
- * finished after 30 minutes. Batches instead of a single unbounded
- * `Promise.all` over every path, so this doesn't try to hold 300k+ file
- * descriptors open at once.
+ * Reads notes in bounded-concurrency batches instead of one at a time —
+ * see `readNotesInBatches` in notes.ts, which this and the auto-link scan
+ * now share (VNL-012). Notes that could not be read are dropped; a source
+ * node with no content contributes nothing to an index.
  */
 async function readNodesInBatches(rootPath: string, paths: string[]): Promise<SourceNode[]> {
+  const notes = await readNotesInBatches(rootPath, paths);
   const nodes: SourceNode[] = [];
-  for (let i = 0; i < paths.length; i += READ_CONCURRENCY) {
-    const batch = paths.slice(i, i + READ_CONCURRENCY);
-    const notes = await Promise.all(batch.map((path) => readNote(rootPath, path)));
-    for (let j = 0; j < notes.length; j++) {
-      const note = notes[j];
-      if (note) {
-        const aliases = Array.isArray(note.frontmatter.aliases) ? (note.frontmatter.aliases as string[]) : [];
-        nodes.push({ id: batch[j], body: note.body, aliases });
-      }
-    }
+  for (let i = 0; i < notes.length; i++) {
+    const note = notes[i];
+    if (!note) continue;
+    const aliases = Array.isArray(note.frontmatter.aliases) ? (note.frontmatter.aliases as string[]) : [];
+    nodes.push({ id: paths[i], body: note.body, aliases });
   }
   return nodes;
 }
