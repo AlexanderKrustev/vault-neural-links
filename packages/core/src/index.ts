@@ -26,6 +26,13 @@ export * from "./decay.js";
 export * from "./priming.js";
 export { appendEvent, appendSearchLog } from "./logger.js";
 export { compact } from "./compactor.js";
+export {
+  activationSocketFilePath,
+  pruneStaleInstanceFiles,
+  removeInstanceFiles,
+  type PruneOptions,
+  type PruneResult,
+} from "./sessionFiles.js";
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 export { buildContentIndex, loadContentIndex, rebuildContentIndex, candidatesFromIndex } from "./contentIndex.js";
 export { tokenize } from "./tokenize.js";

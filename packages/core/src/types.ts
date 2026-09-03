@@ -51,6 +51,10 @@ export interface WeightedNeighbor {
 export interface CompactionResult {
   edgeCount: number;
   compactedAt: string;
+  /** Event-log lines that could not be parsed and were moved to events/quarantine/ (VNL-004). */
+  quarantinedLines: number;
+  /** True when another compactor held the lock and this run did nothing (VNL-004). */
+  skipped?: boolean;
 }
 
 export interface DecayConfig {

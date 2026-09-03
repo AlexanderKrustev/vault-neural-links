@@ -142,7 +142,7 @@ describe("mcp-server tools", () => {
 
   it("activate broadcasts every trace event to the activation socket", async () => {
     const broadcast = vi.fn();
-    ctx.activationSocket = { port: 0, broadcast, close: async () => {} };
+    ctx.activationSocket = { host: "127.0.0.1", port: 0, broadcast, close: async () => {} };
 
     await ctx.client.reinforce("A", "B", 10);
     await compactWeightsTool.handler(ctx)({});
@@ -188,7 +188,7 @@ describe("mcp-server tools", () => {
 
   it("log_traversal and client.reinforce each broadcast an edge_traversed event live", async () => {
     const broadcast = vi.fn();
-    ctx.activationSocket = { port: 0, broadcast, close: async () => {} };
+    ctx.activationSocket = { host: "127.0.0.1", port: 0, broadcast, close: async () => {} };
 
     await logTraversalTool.handler(ctx)({ from: "A", to: "B" });
     // Exercises the same client.reinforce() call shape the (now sole)
@@ -204,7 +204,7 @@ describe("mcp-server tools", () => {
 
   it("compact_weights broadcasts an edge_traversed event for every edge changed since the last compaction", async () => {
     const broadcast = vi.fn();
-    ctx.activationSocket = { port: 0, broadcast, close: async () => {} };
+    ctx.activationSocket = { host: "127.0.0.1", port: 0, broadcast, close: async () => {} };
 
     await logTraversalTool.handler(ctx)({ from: "A", to: "B" });
     broadcast.mockClear(); // isolate compact_weights' own broadcasts from log_traversal's

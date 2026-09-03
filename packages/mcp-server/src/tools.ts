@@ -315,7 +315,9 @@ export const compactWeightsTool = {
     description:
       "Forces an immediate compaction of pending traversal/reinforcement events into " +
       "link-weights.json, instead of waiting for the nightly scheduled compaction. Useful " +
-      "when a just-called reinforce_link or recent reads should be reflected right away.",
+      "when recent reads or log_traversal calls should be reflected right away. Returns " +
+      "`skipped: true` if another compaction was already running, and `quarantinedLines` " +
+      "if any event-log lines were unparseable.",
     inputSchema: {},
   },
   handler: (ctx: ToolContext) => async (_args: Record<string, never>) => {

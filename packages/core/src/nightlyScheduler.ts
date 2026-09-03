@@ -5,6 +5,7 @@ import { createObsidianAdapter } from "./adapters.js";
 import { runNightlyConsolidation } from "./consolidation.js";
 import { loadNoteImportance, runImportanceComputation } from "./importance.js";
 import { runClusterComputation } from "./clustering.js";
+import { pruneStaleInstanceFiles } from "./sessionFiles.js";
 import type { ActivationEventSink } from "./types.js";
 
 export interface NightlyRunResult {
@@ -15,6 +16,8 @@ export interface NightlyRunResult {
   noteCount?: number;
   clusterCount?: number;
   contentIndexTokenCount?: number;
+  /** Stale per-instance session/socket files and expired logs removed (VNL-009). */
+  prunedFileCount?: number;
   computedAt?: string;
 }
 
@@ -61,6 +64,11 @@ export async function runNightlyIfStale(
   const importance = await runImportanceComputation(vaultDataDir, undefined, now);
   const clustering = await runClusterComputation(vaultDataDir, undefined, now);
 
+  // VNL-009: session buffers and socket registrations belonging to MCP
+  // instances that did not exit cleanly, plus log files past their retention
+  // window. Nothing else deletes these.
+  const prune = await pruneStaleInstanceFiles(vaultDataDir, { now });
+
   return {
     ran: true,
     edgeCount: compaction.edgeCount,
@@ -69,6 +77,7 @@ export async function runNightlyIfStale(
     noteCount: importance.noteCount,
     clusterCount: clustering.clusterCount,
     contentIndexTokenCount: contentIndexResult.tokenCount,
+    prunedFileCount: Object.values(prune.removed).reduce((sum, n) => sum + n, 0),
     computedAt: importance.computedAt,
   };
 }

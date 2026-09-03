@@ -27,28 +27,141 @@ function daysSinceDayKey(day: string, now: Date): number {
   return (now.getTime() - new Date(`${day}T00:00:00.000Z`).getTime()) / 86_400_000;
 }
 
-async function readAllEvents(
-  eventsDir: string,
-): Promise<{ entries: EventLogEntry[]; files: string[] }> {
+// VNL-004 — durability of the fold from events/*.jsonl into link-weights.json.
+const LOCK_FILE = ".compact.lock";
+/** A lock older than this is assumed to belong to a crashed compactor. */
+const STALE_LOCK_MS = 15 * 60_000;
+const CLAIM_SUFFIX = ".compacting";
+
+interface CompactLock {
+  release(): Promise<void>;
+}
+
+/**
+ * Exclusive, cross-process lock for one vault's compaction. Two compactors
+ * folding the same event files concurrently would each add the same deltas
+ * to the same base weights and the second `rename` would win, so a
+ * traversal could be counted twice or lost outright. `wx` gives an atomic
+ * create-if-absent on every platform; a lock left behind by a killed
+ * process is reclaimed once it is clearly stale rather than blocking
+ * compaction forever.
+ */
+async function acquireLock(vaultDataDir: string): Promise<CompactLock | null> {
+  const lockPath = join(vaultDataDir, LOCK_FILE);
+  await mkdir(vaultDataDir, { recursive: true });
+
+  const write = async (): Promise<boolean> => {
+    try {
+      await writeFile(lockPath, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), {
+        encoding: "utf8",
+        flag: "wx",
+      });
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw err;
+    }
+  };
+
+  if (await write()) return { release: () => unlink(lockPath).catch(() => {}) };
+
+  let heldSince = 0;
+  try {
+    const held = JSON.parse(await readFile(lockPath, "utf8")) as { startedAt?: string };
+    heldSince = held.startedAt ? new Date(held.startedAt).getTime() : 0;
+  } catch {
+    heldSince = 0; // unreadable or malformed: treat as stale
+  }
+  if (Number.isNaN(heldSince) || Date.now() - heldSince < STALE_LOCK_MS) return null;
+
+  await unlink(lockPath).catch(() => {});
+  if (await write()) return { release: () => unlink(lockPath).catch(() => {}) };
+  return null;
+}
+
+/**
+ * Renames every `events/*.jsonl` to `*.jsonl.compacting-<runId>` before a
+ * single byte is read. Live sessions append with `appendFile`, which
+ * recreates the original name, so everything logged from here on lands in a
+ * fresh file and cannot be deleted unread at the end of this run. Files left
+ * claimed by a previous crashed run are picked up again here rather than
+ * being stranded.
+ */
+async function claimEventFiles(eventsDir: string, runId: string): Promise<string[]> {
   let files: string[];
   try {
     files = await readdir(eventsDir);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { entries: [], files: [] };
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
 
-  const jsonlFiles = files.filter((file) => file.endsWith(".jsonl"));
+  const claimed: string[] = files.filter((file) => file.includes(CLAIM_SUFFIX));
+  for (const file of files.filter((file) => file.endsWith(".jsonl"))) {
+    const claimedName = `${file}${CLAIM_SUFFIX}-${runId}`;
+    try {
+      await rename(join(eventsDir, file), join(eventsDir, claimedName));
+      claimed.push(claimedName);
+    } catch (err) {
+      // Another compactor claimed it first, or a writer still holds it open
+      // (Windows). Either way it is not ours this round; leave it.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw err;
+    }
+  }
+  return claimed;
+}
+
+function isEventLogEntry(value: unknown): value is EventLogEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Partial<EventLogEntry>;
+  return (
+    typeof entry.from === "string" &&
+    typeof entry.to === "string" &&
+    typeof entry.ts === "string" &&
+    !Number.isNaN(new Date(entry.ts).getTime()) &&
+    typeof entry.weight_delta === "number" &&
+    Number.isFinite(entry.weight_delta)
+  );
+}
+
+/**
+ * Reads the claimed files line by line. A single truncated or corrupt line —
+ * the normal result of a machine losing power mid-append — used to throw and
+ * abort the whole compaction, permanently, since the bad line was never
+ * removed. Each bad line is now moved to `events/quarantine/` and the rest of
+ * the log is still folded in.
+ */
+async function readClaimedEvents(
+  eventsDir: string,
+  claimedFiles: string[],
+): Promise<{ entries: EventLogEntry[]; quarantined: string[] }> {
   const entries: EventLogEntry[] = [];
-  for (const file of jsonlFiles) {
+  const quarantined: string[] = [];
+
+  for (const file of claimedFiles) {
     const content = await readFile(join(eventsDir, file), "utf8");
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      entries.push(JSON.parse(trimmed) as EventLogEntry);
+      try {
+        const parsed: unknown = JSON.parse(trimmed);
+        if (!isEventLogEntry(parsed)) throw new Error("not an event log entry");
+        entries.push(parsed);
+      } catch {
+        quarantined.push(trimmed);
+      }
     }
   }
-  return { entries, files: jsonlFiles };
+
+  return { entries, quarantined };
+}
+
+async function quarantineLines(eventsDir: string, runId: string, lines: string[]): Promise<void> {
+  if (lines.length === 0) return;
+  const dir = join(eventsDir, "quarantine");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, `${runId}.jsonl`), `${lines.join("\n")}\n`, "utf8");
 }
 
 async function readExistingWeights(weightsFilePath: string): Promise<LinkWeightsFile | null> {
@@ -63,16 +176,49 @@ async function readExistingWeights(weightsFilePath: string): Promise<LinkWeights
 
 /**
  * Reads all data/events/*.jsonl, folds them onto the edges already recorded in
- * link-weights.json (decayed forward to `compactedAt`), and writes the merged
- * result back atomically (temp file + rename). Event files are only deleted
- * once their contents are safely folded into the weights file, so compaction
- * never loses previously-recorded edges that had no new events this round.
+ * link-weights.json, and writes the merged result back atomically (temp file
+ * + rename). Event files are only deleted once their contents are safely
+ * folded into the weights file, so compaction never loses previously-recorded
+ * edges that had no new events this round.
+ *
+ * VNL-004: the run holds an exclusive lock, claims its input files by
+ * renaming them out of the way of live appenders before reading, and
+ * quarantines unparseable lines instead of aborting on them. Returns
+ * `skipped: true` without touching anything if another compactor holds the
+ * lock.
  */
 export async function compact(vaultDataDir: string, onEvent?: ActivationEventSink): Promise<CompactionResult> {
   const eventsDir = join(vaultDataDir, "events");
   const weightsFilePath = join(vaultDataDir, "link-weights.json");
 
-  const { entries: events, files: processedFiles } = await readAllEvents(eventsDir);
+  const lock = await acquireLock(vaultDataDir);
+  if (!lock) {
+    const existingWeights = await readExistingWeights(weightsFilePath);
+    return {
+      edgeCount: existingWeights ? Object.keys(existingWeights.edges).length : 0,
+      compactedAt: existingWeights?.compactedAt ?? new Date().toISOString(),
+      quarantinedLines: 0,
+      skipped: true,
+    };
+  }
+
+  try {
+    return await runCompaction(vaultDataDir, eventsDir, weightsFilePath, onEvent);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function runCompaction(
+  vaultDataDir: string,
+  eventsDir: string,
+  weightsFilePath: string,
+  onEvent?: ActivationEventSink,
+): Promise<CompactionResult> {
+  const runId = randomUUID();
+  const processedFiles = await claimEventFiles(eventsDir, runId);
+  const { entries: events, quarantined } = await readClaimedEvents(eventsDir, processedFiles);
+  await quarantineLines(eventsDir, runId, quarantined);
   const compactedAt = new Date();
 
   const edges = new Map<string, EdgeRecord>();
@@ -161,8 +307,10 @@ export async function compact(vaultDataDir: string, onEvent?: ActivationEventSin
   await writeFile(tmpPath, JSON.stringify(payload, null, 2), "utf8");
   await rename(tmpPath, weightsFilePath);
 
-  // Only the files whose contents are already folded into link-weights.json are safe to
-  // remove — any .jsonl written concurrently by a live session is left for the next run.
+  // Only the files this run claimed are removed, and only now that their
+  // contents are on disk inside link-weights.json. Anything a live session
+  // appended since the claim sits in a freshly created .jsonl and is left
+  // for the next run.
   await Promise.all(
     processedFiles.map((file) =>
       unlink(join(eventsDir, file)).catch((err) => {
@@ -172,7 +320,6 @@ export async function compact(vaultDataDir: string, onEvent?: ActivationEventSin
   );
 
   if (onEvent && changed.size > 0) {
-    const runId = randomUUID();
     for (const { from, to, delta } of changed.values()) {
       onEvent({
         type: "edge_traversed",
@@ -187,5 +334,9 @@ export async function compact(vaultDataDir: string, onEvent?: ActivationEventSin
     }
   }
 
-  return { edgeCount: edges.size, compactedAt: payload.compactedAt };
+  return {
+    edgeCount: edges.size,
+    compactedAt: payload.compactedAt,
+    quarantinedLines: quarantined.length,
+  };
 }

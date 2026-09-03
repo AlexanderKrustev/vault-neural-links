@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { removeInstanceFiles } from "@vault-neural-links/core";
 import { startActivationSocketServer } from "./activationSocket.js";
 import {
   ablationDiffTool,
@@ -48,12 +49,31 @@ try {
 // packages/obsidian-plugin/src/NightlyScheduler.ts, AIBRAIN-46). This
 // process still exposes compact_weights for on-demand ad-hoc compaction.
 
+// VNL-009: this instance's session buffer and socket registration describe
+// live state, so they are deleted when the process goes away — on either
+// signal, and on stdin close, which is how an MCP client actually ends a
+// stdio server. Files left by a hard kill are collected by the nightly
+// prune instead.
+let shuttingDown = false;
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await ctx.activationSocket?.close();
+  await removeInstanceFiles(ctx.vaultDataDir, instanceId);
+  process.exit(0);
+}
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, async () => {
-    await ctx.activationSocket?.close();
-    process.exit(0);
+  process.on(signal, () => {
+    void shutdown();
   });
 }
+process.stdin.on("close", () => {
+  void shutdown();
+});
+process.stdin.on("end", () => {
+  void shutdown();
+});
 
 // VNL-005: report the real published version rather than a hardcoded 0.0.0.
 // `dist/index.js` and `src/index.ts` are both one directory below the package
