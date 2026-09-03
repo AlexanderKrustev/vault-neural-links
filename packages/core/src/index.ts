@@ -9,6 +9,7 @@ import { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOp
 import { recall, type RecallOptions, type RecallResult } from "./recall.js";
 import { resolveDataDir } from "./vaultPaths.js";
 import { SessionBuffer, persistSessionBuffer } from "./priming.js";
+import { termEvents } from "./termWeights.js";
 import type {
   AblationDiffResult,
   AblationLayers,
@@ -17,6 +18,7 @@ import type {
   CompactionResult,
   ReinforceTrigger,
   SpreadingActivationConfig,
+  TermTrigger,
   TraversalTrigger,
   WeightedNeighbor,
 } from "./types.js";
@@ -71,6 +73,19 @@ export {
 } from "./accountSession.js";
 export { computeUsageReport } from "./usageReport.js";
 export { HumanNavigationTracker } from "./humanSignal.js";
+export {
+  learnableQueryTerms,
+  liveTermScores,
+  loadTermWeights,
+  termEdgeKey,
+  parseTermEdgeKey,
+  termEvents,
+  isTermEvent,
+  TERM_LEARN_WEIGHT,
+  TERM_HALF_LIFE_DAYS,
+  TERM_WEIGHTS_FILE_NAME,
+  type TermScore,
+} from "./termWeights.js";
 export * from "./frontmatter.js";
 export * from "./notes.js";
 export * from "./autolink.js";
@@ -116,6 +131,14 @@ export interface VaultLinkClient {
   /** Appends an unconditional search-log entry (AIBRAIN-70) — no priming, no weight change, just a persisted trace that a search happened. */
   logSearch(query: string, resultCount: number, useWeights: boolean): Promise<void>;
   reinforce(from: string, to: string, boost?: number, onEvent?: ActivationEventSink, trigger?: ReinforceTrigger): Promise<void>;
+  /**
+   * VNL-053: persists a query-token -> note association for each of
+   * `terms`, crediting `notePath`. No-op for an empty `terms` array (a
+   * caller need not check that itself). Session-only priming is the
+   * caller's job, same as reinforce() — this only appends the durable
+   * signal.
+   */
+  learnTerms(terms: string[], notePath: string, trigger: TermTrigger): Promise<void>;
   getWeightedNeighbors(note: string, topK?: number): Promise<WeightedNeighbor[]>;
   activate(
     note: string,
@@ -193,6 +216,16 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
       });
       onEvent?.({ type: "edge_traversed", runId: randomUUID(), origin: from, hop: 0, from, to, energy: boost, ts });
     },
+
+    // VNL-053: no session touch, no activation event — this is a background
+    // learning signal for future query matching, not something happening to
+    // note-to-note weight or the session buffer.
+    async learnTerms(terms: string[], notePath: string, trigger: TermTrigger) {
+      for (const event of termEvents(instanceId, terms, notePath, trigger)) {
+        await appendEvent(vaultDataDir, instanceId, event);
+      }
+    },
+
 
     async logSearch(query: string, resultCount: number, useWeights: boolean) {
       await appendSearchLog(vaultDataDir, instanceId, {

@@ -86,6 +86,13 @@ export class UsageReportPanel {
       cls: "vault-neural-links-usage-line",
     });
     mechanisms.createDiv({ text: `search: ${report.mechanismCounts.search}`, cls: "vault-neural-links-usage-line" });
+    // VNL-052: kept on its own line, not folded into traverse/reinforce
+    // above — see computeUsageReport's own reasoning for why the two must
+    // stay legible as separate numbers.
+    mechanisms.createDiv({
+      text: `your navigation: ${report.mechanismCounts.human.opens} opens / ${report.mechanismCounts.human.edits} edits`,
+      cls: "vault-neural-links-usage-line",
+    });
 
     const notes = this.resultsEl.createDiv({ cls: "vault-neural-links-usage-section" });
     notes.createDiv({ text: "Most-touched notes", cls: "vault-neural-links-usage-section-title" });

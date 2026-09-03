@@ -1,4 +1,10 @@
-export type EventType = "traverse" | "reinforce" | "decay";
+/**
+ * "term" (VNL-053) is the odd one out: its `from` is a query token, not a
+ * note path, and it folds into term-weights.json rather than
+ * link-weights.json — see termWeights.ts for why the two graphs are kept
+ * apart.
+ */
+export type EventType = "traverse" | "reinforce" | "decay" | "term";
 
 /**
  * What actually caused a "traverse" event — read_note's automatic logging,
@@ -12,6 +18,8 @@ export type TraversalTrigger = "read" | "manual" | "human-open";
  * editing the note they navigated to inside Obsidian (VNL-052).
  */
 export type ReinforceTrigger = "explicit" | "auto-retrieval" | "human-edit";
+/** What caused a "term" event — which query-driven tool returned the note that was then read (VNL-053). */
+export type TermTrigger = "search-read" | "recall-read";
 
 /**
  * Tuning for the Obsidian plugin's human-navigation sensor (VNL-052).
@@ -57,7 +65,7 @@ export interface EventLogEntry {
    * a missing trigger as "read" for traverse events and "explicit" for
    * reinforce events, since that's all that could have produced them then.
    */
-  trigger?: TraversalTrigger | ReinforceTrigger;
+  trigger?: TraversalTrigger | ReinforceTrigger | TermTrigger;
 }
 
 export interface EdgeRecord {
@@ -70,6 +78,23 @@ export interface EdgeRecord {
   reactivationDays: string[];
   /** Long-term tier promoted by the nightly consolidation job once reactivationDays crosses its threshold — added undecayed to live weight, so consolidated edges resist the recent tier's decay entirely. */
   consolidatedScore: number;
+}
+
+/**
+ * Learned query-token -> note associations (VNL-053), structurally identical
+ * to LinkWeightsFile so the same decay and consolidation math applies
+ * unchanged — but a separate file, because these edges are not note-to-note
+ * and must never appear as neighbors in the note graph (spreading activation
+ * would happily walk into a token and back out into every note that ever
+ * matched it).
+ *
+ * Keys are `token|notePath`, unsorted: direction is meaningful here, unlike
+ * link-weights.json's undirected note pairs.
+ */
+export interface TermWeightsFile {
+  version: number;
+  compactedAt: string;
+  edges: Record<string, EdgeRecord>;
 }
 
 export interface LinkWeightsFile {
@@ -95,6 +120,8 @@ export interface CompactionResult {
   quarantinedLines: number;
   /** True when another compactor held the lock and this run did nothing (VNL-004). */
   skipped?: boolean;
+  /** Learned query-token -> note edges after this fold (VNL-053). */
+  termEdgeCount?: number;
 }
 
 export interface DecayConfig {
@@ -535,6 +562,13 @@ export interface UsageReportMechanismCounts {
    * different per-event weights, and mixing them would make both unreadable.
    */
   human: { opens: number; edits: number };
+  /**
+   * Term-to-note learning events (VNL-053) — a query's selective terms
+   * credited to a note that was read right after search_notes/recall
+   * returned it. Split by which tool produced the query, not by weight
+   * tier: both are the same deterministic signal.
+   */
+  termLearn: { searchRead: number; recallRead: number };
   activate: { activation: number; keyword: number; recency: number };
   /** get_weighted_neighbors() call count (AIBRAIN-126) — previously invisible to this report since the tool logged nothing. */
   getWeightedNeighbors: number;

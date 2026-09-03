@@ -52,6 +52,7 @@ describe("computeUsageReport", () => {
       traverse: 0,
       reinforce: { explicit: 0, autoRetrieval: 0 },
       human: { opens: 0, edits: 0 },
+      termLearn: { searchRead: 0, recallRead: 0 },
       activate: { activation: 0, keyword: 0, recency: 0 },
       getWeightedNeighbors: 0,
       search: 0,
@@ -130,6 +131,22 @@ describe("computeUsageReport", () => {
     await writeJsonl(join(dataDir, "search"), "inst-1.jsonl", [search({})]);
     const withSearch = await computeUsageReport(dataDir);
     expect(withSearch.gaps.some((g) => g.includes("No search_notes activity recorded"))).toBe(false);
+  });
+
+  it("counts term-learning events on their own axis and keeps query tokens out of touched notes (VNL-053)", async () => {
+    await writeJsonl(join(dataDir, "events"), "inst-1.jsonl", [
+      event({ type: "term", from: "kill", to: "Kill Process By Port", trigger: "search-read" }),
+      event({ type: "term", from: "port", to: "Kill Process By Port", trigger: "recall-read" }),
+      event({ type: "traverse", from: "A", to: "B" }),
+    ]);
+
+    const report = await computeUsageReport(dataDir);
+
+    expect(report.mechanismCounts.termLearn).toEqual({ searchRead: 1, recallRead: 1 });
+    // The token "kill"/"port" must never appear as a touched note — only the
+    // real note-note traverse above should show up.
+    expect(report.topTouchedNotes.map((n) => n.path).sort()).toEqual(["A", "B"]);
+    expect(report.mechanismCounts.traverse).toBe(1);
   });
 
   it("treats a reinforce event with no trigger field as explicit (pre-AIBRAIN-71 data)", async () => {

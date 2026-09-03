@@ -6,12 +6,14 @@ import {
   getEdgeWeight,
   initInstance,
   isVaultRelativePath,
+  learnableQueryTerms,
   listNotes,
   readNote,
   resolveDataDir,
   searchNotes,
   writeNoteWithAutoLink,
   type ActivationTraceEvent,
+  type TermTrigger,
   type VaultLinkClient,
 } from "@vault-neural-links/core";
 import type { ActivationSocketServer } from "./activationSocket.js";
@@ -39,6 +41,15 @@ export interface ToolContext {
    * process-lifetime-only scope as lastReadNote.
    */
   pendingRetrievals: Map<string, string>;
+  /**
+   * Notes that surfaced in this session's most recent search_notes/recall
+   * result, mapped to the query terms worth learning from them if one is
+   * then actually read (VNL-053) — a text query has no single origin note
+   * the way activate()/get_weighted_neighbors() do, so this is a separate
+   * map keyed the same way rather than reusing pendingRetrievals. Same
+   * overwritten-wholesale, consumed-on-credit lifecycle.
+   */
+  pendingTermRetrievals: Map<string, { terms: string[]; trigger: TermTrigger }>;
 }
 
 const VAULT_PATH_RULE =
@@ -91,14 +102,17 @@ export const recallTool = {
     description:
       "The recommended entry point for 'what should I read about X?'. Takes the question itself, " +
       "not a note you already know about: relevance scoring (BM25 over the content index) picks " +
-      "the notes that match, then spreading activation over the usage-weighted link graph expands " +
-      "and re-ranks them, so notes the vault's own link/usage structure says belong with the " +
-      "matches surface too — even ones no query term touches. Each hit comes back with a snippet " +
-      "and a `why` (matched terms, the seed note and hop count the graph reached it through, " +
-      "activation energy, days since the file changed, and `supersededBy` when the note is marked " +
-      "outdated), so results can be triaged without a read_note call each. Use search_notes " +
-      "instead only when you want a literal text match with no graph involvement, and " +
-      "get_weighted_neighbors / activate when your starting point genuinely is a specific note.",
+      "the notes that match, spreading activation over the usage-weighted link graph expands and " +
+      "re-ranks them so notes the vault's own link/usage structure says belong with the matches " +
+      "surface too, and what past searches have taught the engine your own words mean can surface " +
+      "a note even when nothing in today's query text matches it. Each hit comes back with a snippet and a " +
+      "`why` (matched terms, the seed note and hop count the graph reached it through, activation " +
+      "energy, any learned term association and its score, days since the file changed, and " +
+      "`supersededBy` when the note is marked outdated), so results can be triaged without a " +
+      "read_note call each. Reading a result afterward also teaches the engine what this query's " +
+      "words mean for you, going forward. Use search_notes instead only when you want a literal " +
+      "text match with no graph involvement, and get_weighted_neighbors / activate when your " +
+      "starting point genuinely is a specific note.",
     inputSchema: {
       query: z.string().describe("What you are looking for, in natural language or keywords"),
       topK: z.number().int().positive().max(100).optional().describe("Max results to return (default 10)"),
@@ -128,6 +142,22 @@ export const recallTool = {
       ctx.pendingRetrievals = new Map(
         result.hits.flatMap((hit) => (hit.why.via ? [[hit.path, hit.why.via] as [string, string]] : [])),
       );
+
+      // Term-to-note learning (VNL-053): credit whichever of this query's
+      // selective terms actually matched a hit's text — reusing
+      // matchedTerms rather than recomputing, since recall already applied
+      // the same selectivity filter to produce it. A hit that surfaced
+      // purely through an earlier learned association (source: "term", no
+      // text match) has no matchedTerms; reading it again re-credits the
+      // terms that got it there instead, which is the same "confirmed by
+      // being acted on" signal, not double-counting a different thing.
+      ctx.pendingTermRetrievals = new Map(
+        result.hits.flatMap((hit) => {
+          const terms = hit.why.matchedTerms.length > 0 ? hit.why.matchedTerms : (hit.why.learnedTerms ?? []);
+          return terms.length > 0 ? [[hit.path, { terms, trigger: "recall-read" as const }] as const] : [];
+        }),
+      );
+
       return textResult(result);
     },
 };
@@ -485,6 +515,18 @@ export const readNoteTool = {
         await ctx.client.reinforce(origin, path, AUTO_REINFORCE_BOOST, (event) => ctx.activationSocket?.broadcast(event), "auto-retrieval");
         ctx.pendingRetrievals.delete(path);
       }
+
+      // Term-to-note learning (VNL-053): this note surfaced in the session's
+      // most recent search_notes/recall result for a query with at least one
+      // selective term, and is now actually being read — the same
+      // deterministic "acted on" signal as the reinforcement above, credited
+      // once per retrieval, but persisted against the query's terms instead
+      // of a single origin note.
+      const termPending = ctx.pendingTermRetrievals.get(path);
+      if (termPending) {
+        await ctx.client.learnTerms(termPending.terms, path, termPending.trigger);
+        ctx.pendingTermRetrievals.delete(path);
+      }
     }
     return textResult(note ?? { error: `No note found at ${path}` });
   },
@@ -537,6 +579,15 @@ export const searchNotesTool = {
       // "origin" note for a text query the way there is for a note-relative
       // retrieval, so this pending set has no meaningful reinforcement
       // source note and is intentionally left out of pendingRetrievals.
+      //
+      // It does have a term-learning signal, though (VNL-053): the query's
+      // selective terms, credited to whichever of these hits is actually
+      // read next.
+      const learnTerms = await learnableQueryTerms(ctx.vaultDataDir, query);
+      ctx.pendingTermRetrievals =
+        learnTerms.length > 0 && hits.length > 0
+          ? new Map(hits.map((h) => [h.path, { terms: learnTerms, trigger: "search-read" as const }]))
+          : new Map();
       return textResult(hits);
     },
 };
@@ -547,5 +598,6 @@ export function makeToolContext(vaultPath: string, instanceId: string): ToolCont
     vaultDataDir: resolveDataDir(vaultPath),
     client: initInstance(vaultPath, instanceId),
     pendingRetrievals: new Map(),
+    pendingTermRetrievals: new Map(),
   };
 }

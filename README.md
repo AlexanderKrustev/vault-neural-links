@@ -128,7 +128,7 @@ ribbon icon or the "Open Neural Graph" command.
 
 | Tool | Purpose |
 |---|---|
-| `recall` | **Start here.** Answers a query, not a note path: BM25 relevance picks the matching notes, spreading activation over the weighted graph expands and re-ranks them, and every hit comes back with a snippet and a `why` (matched terms, seed note and hop count, activation energy, staleness, supersession) |
+| `recall` | **Start here.** Answers a query, not a note path: BM25 relevance picks the matching notes, spreading activation over the weighted graph expands and re-ranks them, learned term↔note associations from your own past searches can surface a note even with no text match today, and every hit comes back with a snippet and a `why` (matched terms, seed note and hop count, activation energy, learned-term score, staleness, supersession). Reading a result teaches it what your words mean, going forward. |
 | `create_note` | Create a note (frontmatter + body); auto-links it and logs the change |
 | `update_note` | Replace a note's body, or append text under a heading (e.g. `## Updates`) |
 | `read_note` | Read a note's parsed frontmatter and body |

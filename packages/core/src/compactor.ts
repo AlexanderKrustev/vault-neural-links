@@ -7,7 +7,9 @@ import type {
   EdgeRecord,
   EventLogEntry,
   LinkWeightsFile,
+  TermWeightsFile,
 } from "./types.js";
+import { isTermEvent, termEdgeKey, TERM_WEIGHTS_FILE_NAME } from "./termWeights.js";
 
 const WEIGHTS_FILE_VERSION = 1;
 // Generous upper bound on how long reactivationDays needs to remember —
@@ -164,6 +166,76 @@ async function quarantineLines(eventsDir: string, runId: string, lines: string[]
   await writeFile(join(dir, `${runId}.jsonl`), `${lines.join("\n")}\n`, "utf8");
 }
 
+/**
+ * Folds raw event deltas onto whatever edges are already recorded. Shared by
+ * the note graph and VNL-053's term graph — the two differ only in how an
+ * event maps to an edge key, not in the arithmetic.
+ */
+function foldEvents(
+  edges: Map<string, EdgeRecord>,
+  events: EventLogEntry[],
+  keyOf: (entry: EventLogEntry) => string,
+): Map<string, { from: string; to: string; delta: number }> {
+  const changed = new Map<string, { from: string; to: string; delta: number }>();
+
+  for (const entry of events) {
+    const key = keyOf(entry);
+    const record = edges.get(key) ?? {
+      baseStrength: 0,
+      lastTouched: entry.ts,
+      traverseCount: 0,
+      reinforceCount: 0,
+      reactivationDays: [],
+      consolidatedScore: 0,
+    };
+
+    record.baseStrength += entry.weight_delta;
+    if (new Date(entry.ts).getTime() > new Date(record.lastTouched).getTime()) {
+      record.lastTouched = entry.ts;
+    }
+    // A term event counts as a traversal of its token -> note edge: it is
+    // the same "this was used" tick the established-edge check in query.ts
+    // reads, and term edges have no second tier to distinguish.
+    if (entry.type === "traverse" || entry.type === "term") record.traverseCount += 1;
+    if (entry.type === "reinforce") record.reinforceCount += 1;
+
+    const day = dayKey(entry.ts);
+    if (!record.reactivationDays.includes(day)) record.reactivationDays.push(day);
+
+    edges.set(key, record);
+
+    const existingDelta = changed.get(key);
+    if (existingDelta) existingDelta.delta += entry.weight_delta;
+    else changed.set(key, { from: entry.from, to: entry.to, delta: entry.weight_delta });
+  }
+
+  return changed;
+}
+
+function pruneReactivationDays(edges: Map<string, EdgeRecord>, now: Date): void {
+  for (const record of edges.values()) {
+    record.reactivationDays = record.reactivationDays.filter(
+      (day) => daysSinceDayKey(day, now) <= REACTIVATION_RETENTION_DAYS,
+    );
+  }
+}
+
+async function writeAtomically(vaultDataDir: string, filePath: string, payload: unknown): Promise<void> {
+  await mkdir(vaultDataDir, { recursive: true });
+  const tmpPath = join(vaultDataDir, `.compact.${randomUUID()}.tmp`);
+  await writeFile(tmpPath, JSON.stringify(payload, null, 2), "utf8");
+  await rename(tmpPath, filePath);
+}
+
+async function readExistingTermWeights(filePath: string): Promise<TermWeightsFile | null> {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8")) as TermWeightsFile;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
 async function readExistingWeights(weightsFilePath: string): Promise<LinkWeightsFile | null> {
   try {
     const content = await readFile(weightsFilePath, "utf8");
@@ -216,16 +288,19 @@ async function runCompaction(
   onEvent?: ActivationEventSink,
 ): Promise<CompactionResult> {
   const runId = randomUUID();
+  const termWeightsFilePath = join(vaultDataDir, TERM_WEIGHTS_FILE_NAME);
   const processedFiles = await claimEventFiles(eventsDir, runId);
   const { entries: events, quarantined } = await readClaimedEvents(eventsDir, processedFiles);
   await quarantineLines(eventsDir, runId, quarantined);
   const compactedAt = new Date();
 
+  // VNL-053: term events describe a query token -> note association, not a
+  // note pair, and fold into their own file. Everything else is the note
+  // graph, exactly as before.
+  const noteEvents = events.filter((entry) => !isTermEvent(entry));
+  const termEventEntries = events.filter(isTermEvent);
+
   const edges = new Map<string, EdgeRecord>();
-  // Tracks which edges actually changed this compaction round (and by how
-  // much), so onEvent only fires for real weight changes rather than every
-  // pre-existing edge carried forward unchanged.
-  const changed = new Map<string, { from: string; to: string; delta: number }>();
 
   const existing = await readExistingWeights(weightsFilePath);
   if (existing) {
@@ -255,46 +330,25 @@ async function runCompaction(
   // Decay is no longer applied here — compaction only folds raw event deltas
   // into baseStrength. Ranking applies decay live at query time, based on
   // elapsed time since lastTouched (see query.ts).
-  for (const entry of events) {
-    const key = edgeKey(entry.from, entry.to);
-    const record = edges.get(key) ?? {
-      baseStrength: 0,
-      lastTouched: entry.ts,
-      traverseCount: 0,
-      reinforceCount: 0,
-      reactivationDays: [],
-      consolidatedScore: 0,
-    };
-
-    record.baseStrength += entry.weight_delta;
-    if (new Date(entry.ts).getTime() > new Date(record.lastTouched).getTime()) {
-      record.lastTouched = entry.ts;
-    }
-    if (entry.type === "traverse") record.traverseCount += 1;
-    if (entry.type === "reinforce") record.reinforceCount += 1;
-
-    const day = dayKey(entry.ts);
-    if (!record.reactivationDays.includes(day)) record.reactivationDays.push(day);
-
-    edges.set(key, record);
-
-    const existingDelta = changed.get(key);
-    if (existingDelta) {
-      existingDelta.delta += entry.weight_delta;
-    } else {
-      changed.set(key, { from: entry.from, to: entry.to, delta: entry.weight_delta });
-    }
-  }
+  //
+  // `changed` tracks which edges actually moved this round (and by how much),
+  // so onEvent only fires for real weight changes rather than every
+  // pre-existing edge carried forward unchanged.
+  const changed = foldEvents(edges, noteEvents, (entry) => edgeKey(entry.from, entry.to));
 
   // reactivationDays only needs to outlive the widest realistic consolidation
   // window; pruning here (rather than only at nightly-consolidation time)
   // keeps the array from growing unbounded for edges reactivated daily over
   // months or years.
-  for (const record of edges.values()) {
-    record.reactivationDays = record.reactivationDays.filter(
-      (day) => daysSinceDayKey(day, compactedAt) <= REACTIVATION_RETENTION_DAYS,
-    );
+  pruneReactivationDays(edges, compactedAt);
+
+  const termEdges = new Map<string, EdgeRecord>();
+  const existingTerms = await readExistingTermWeights(termWeightsFilePath);
+  if (existingTerms) {
+    for (const [key, record] of Object.entries(existingTerms.edges)) termEdges.set(key, record);
   }
+  foldEvents(termEdges, termEventEntries, (entry) => termEdgeKey(entry.from, entry.to));
+  pruneReactivationDays(termEdges, compactedAt);
 
   const payload: LinkWeightsFile = {
     version: WEIGHTS_FILE_VERSION,
@@ -302,10 +356,18 @@ async function runCompaction(
     edges: Object.fromEntries(edges),
   };
 
-  await mkdir(vaultDataDir, { recursive: true });
-  const tmpPath = join(vaultDataDir, `.link-weights.${randomUUID()}.tmp`);
-  await writeFile(tmpPath, JSON.stringify(payload, null, 2), "utf8");
-  await rename(tmpPath, weightsFilePath);
+  await writeAtomically(vaultDataDir, weightsFilePath, payload);
+
+  // Written even when empty once any term edge has ever existed, so a reader
+  // never has to distinguish "no file" from "no learning yet".
+  if (termEdges.size > 0 || existingTerms) {
+    const termPayload: TermWeightsFile = {
+      version: WEIGHTS_FILE_VERSION,
+      compactedAt: compactedAt.toISOString(),
+      edges: Object.fromEntries(termEdges),
+    };
+    await writeAtomically(vaultDataDir, termWeightsFilePath, termPayload);
+  }
 
   // Only the files this run claimed are removed, and only now that their
   // contents are on disk inside link-weights.json. Anything a live session
@@ -336,6 +398,7 @@ async function runCompaction(
 
   return {
     edgeCount: edges.size,
+    termEdgeCount: termEdges.size,
     compactedAt: payload.compactedAt,
     quarantinedLines: quarantined.length,
   };

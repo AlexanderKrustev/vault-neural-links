@@ -71,6 +71,8 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
   let reinforceAutoCount = 0;
   let humanOpenCount = 0;
   let humanEditCount = 0;
+  let termSearchReadCount = 0;
+  let termRecallReadCount = 0;
   let searchCount = 0;
   let getWeightedNeighborsCount = 0;
   const activateTierCounts = { activation: 0, keyword: 0, recency: 0 };
@@ -98,6 +100,15 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
       // counted on their own axis — they are ~100x more numerous and carry a
       // much smaller weight each, so folding them into traverse/reinforce
       // would drown the agent-side numbers this report exists to show.
+      if (event.type === "term") {
+        // VNL-053: `from` is a query token here, not a note path — folding
+        // it into touchCounts below would inject fake "touched notes" keyed
+        // by arbitrary search words into topTouchedNotes. Counted on its own
+        // axis instead, same reasoning as the human split above.
+        if (event.trigger === "recall-read") termRecallReadCount++;
+        else termSearchReadCount++;
+        continue;
+      }
       if (event.trigger === "human-open") humanOpenCount++;
       else if (event.trigger === "human-edit") humanEditCount++;
       else if (event.type === "traverse") traverseCount++;
@@ -180,6 +191,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
       traverse: traverseCount,
       reinforce: { explicit: reinforceExplicitCount, autoRetrieval: reinforceAutoCount },
       human: { opens: humanOpenCount, edits: humanEditCount },
+      termLearn: { searchRead: termSearchReadCount, recallRead: termRecallReadCount },
       activate: activateTierCounts,
       getWeightedNeighbors: getWeightedNeighborsCount,
       search: searchCount,

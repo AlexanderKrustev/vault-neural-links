@@ -9,6 +9,7 @@ import { writeNote, toFilePath } from "../src/notes.js";
 import { SessionBuffer } from "../src/priming.js";
 import { recall } from "../src/recall.js";
 import { rebuildStructuralIndex } from "../src/structuralLinks.js";
+import { termEvents } from "../src/termWeights.js";
 
 describe("recall", () => {
   let vaultPath: string;
@@ -214,6 +215,47 @@ describe("recall", () => {
     const result = await recall(vaultPath, dataDir, "shared vocabulary", { topK: 2 });
 
     expect(result.hits).toHaveLength(2);
+  });
+
+  it("surfaces a note via a learned term association, even when nothing in its text matches (VNL-053)", async () => {
+    // "kpbp" is this user's own shorthand and appears nowhere in the note.
+    await note("Windows Find and Kill Process by Port", "netstat and taskkill by pid");
+    await note("Unrelated Filler", "nothing to do with any of this");
+    await rebuildContentIndex(vaultPath, dataDir);
+    for (const event of termEvents("inst-1", ["kpbp"], "Windows Find and Kill Process by Port", "search-read")) {
+      await appendEvent(dataDir, "inst-1", event);
+    }
+    await compact(dataDir);
+
+    const result = await recall(vaultPath, dataDir, "kpbp");
+    const hit = result.hits[0];
+
+    expect(hit.path).toBe("Windows Find and Kill Process by Port");
+    expect(hit.source).toBe("term");
+    expect(hit.why.termScore).toBeGreaterThan(0);
+    expect(hit.why.learnedTerms).toEqual(["kpbp"]);
+    // No lexical or graph contribution — the term signal alone must still
+    // produce a usable snippet.
+    expect(hit.why.lexicalScore).toBe(0);
+    expect(hit.snippet.length).toBeGreaterThan(0);
+  });
+
+  it("boosts a lexical hit that also has a learned term association, without a term score alone outranking a strong textual match", async () => {
+    await note("Kill Process By Port", "lsof and kill the pid on a port");
+    await note("Only Learned", "shares nothing with the query text");
+    await rebuildContentIndex(vaultPath, dataDir);
+    for (const event of termEvents("inst-1", ["port"], "Only Learned", "recall-read")) {
+      await appendEvent(dataDir, "inst-1", event);
+    }
+    await compact(dataDir);
+
+    const result = await recall(vaultPath, dataDir, "kill process by port");
+
+    // The genuine text match still wins even though the other note has a
+    // learned association with one of the query's terms.
+    expect(result.hits[0].path).toBe("Kill Process By Port");
+    const learned = result.hits.find((hit) => hit.path === "Only Learned");
+    expect(learned?.source).toBe("term");
   });
 
   it("expands through structural wikilinks even with no usage history", async () => {

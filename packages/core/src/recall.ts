@@ -4,6 +4,7 @@ import { candidatesFromIndex, loadContentIndex } from "./contentIndex.js";
 import { listNotes, readNotesInBatches, searchNotes, toFilePath, type NoteRef } from "./notes.js";
 import type { SessionBuffer } from "./priming.js";
 import { readSupersession } from "./relations.js";
+import { liveTermScores } from "./termWeights.js";
 import { tokenize } from "./tokenize.js";
 import type { ActivationEventSink, ContentIndexFile, SpreadingActivationConfig } from "./types.js";
 import { DEFAULT_SPREADING_ACTIVATION_CONFIG } from "./types.js";
@@ -36,6 +37,15 @@ const DEFAULT_SEED_ENERGY = 10;
  * Kept as an option so VNL-020's benchmark can sweep it instead of guessing.
  */
 const DEFAULT_GRAPH_WEIGHT = 0.5;
+/**
+ * Weight of the (normalized) learned-term score relative to lexical, in the
+ * same additive blend as graphWeight (VNL-053). Deliberately below 1: this
+ * is what "kill process by port" has meant for this user in the past, which
+ * is real evidence but personal and easily stale — it must not be able to
+ * override what the query's words plainly say today. An opening position,
+ * not a measurement; VNL-020 is where it gets earned.
+ */
+const DEFAULT_TERM_WEIGHT = 0.4;
 /** Wall-clock bound on the whole graph-expansion phase (all seeds together). */
 const DEFAULT_GRAPH_BUDGET_MS = 1000;
 /** Characters of body returned per hit so the agent needn't call read_note to triage. */
@@ -101,14 +111,26 @@ export interface RecallWhy {
   supersededBy?: string;
   /** True if this note is in the session buffer, i.e. already seen this session. */
   primed?: boolean;
+  /**
+   * Live-decayed score from what this user's past searches have taught the
+   * engine these query terms mean (VNL-053) — set only when at least one
+   * query term has a learned association with this note.
+   */
+  termScore?: number;
+  /** Which query terms contributed to `termScore`, strongest first. */
+  learnedTerms?: string[];
 }
 
 export interface RecallHit {
   path: string;
   /** Blended lexical + graph score, comparable only within one result set. */
   score: number;
-  /** Which signal produced this hit — "graph" means no query term matched it at all. */
-  source: "lexical" | "graph" | "both";
+  /**
+   * Which signal produced this hit. "term" means the note surfaced purely
+   * because this user's own history associates a query term with it — no
+   * text in the note matches today and the graph didn't reach it either.
+   */
+  source: "lexical" | "graph" | "both" | "term";
   /** Leading body text (around the first matched term), so triage needs no read_note round trip. */
   snippet: string;
   why: RecallWhy;
@@ -128,6 +150,8 @@ export interface RecallOptions {
   seedCount?: number;
   seedEnergy?: number;
   graphWeight?: number;
+  /** Weight of learned query-term associations in the blend (VNL-053, default 0.4). */
+  termWeight?: number;
   /** Wall-clock bound for the graph phase; lexical scoring always completes. */
   budgetMs?: number;
   activationConfig?: SpreadingActivationConfig;
@@ -340,6 +364,7 @@ export async function recall(
     seedCount = DEFAULT_SEED_COUNT,
     seedEnergy = DEFAULT_SEED_ENERGY,
     graphWeight = DEFAULT_GRAPH_WEIGHT,
+    termWeight = DEFAULT_TERM_WEIGHT,
     budgetMs = DEFAULT_GRAPH_BUDGET_MS,
     activationConfig = DEFAULT_SPREADING_ACTIVATION_CONFIG,
     onEvent,
@@ -388,6 +413,19 @@ export async function recall(
   const scored = bm25(candidates, scoringTerms, documentFrequency, totalNotes)
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
+
+  // --- Learned-term phase (VNL-053) -----------------------------------------
+  // What this user's own past searches associate these terms with — the same
+  // selective terms BM25 scored, so a stopword can't have a learned
+  // association either. Independent of whether the lexical/graph phases
+  // found anything: this is how a personal shorthand ("kill process by
+  // port" meaning one specific note) surfaces even when the note's own text
+  // doesn't obviously match.
+  const termScores = await liveTermScores(
+    vaultDataDir,
+    scoringTerms.map((term) => term.token),
+    now,
+  );
 
   // --- Graph phase ---------------------------------------------------------
   const seeds = scored.slice(0, seedCount);
@@ -462,22 +500,28 @@ export async function recall(
   // silently mean something different per query.
   const maxLexical = scored[0]?.score ?? 0;
   const maxEnergy = Math.max(0, ...[...graph.values()].map((g) => g.energy));
+  const maxTermScore = Math.max(0, ...[...termScores.values()].map((t) => t.score));
 
   const byPath = new Map<string, ScoredNote>(scored.map((entry) => [entry.note.path, entry]));
-  const allPaths = new Set<string>([...byPath.keys(), ...graph.keys()]);
+  const allPaths = new Set<string>([...byPath.keys(), ...graph.keys(), ...termScores.keys()]);
 
   const ranked = [...allPaths]
     .map((path) => {
       const lexical = byPath.get(path);
       const graphHit = graph.get(path);
+      const termHit = termScores.get(path);
       const lexicalNorm = lexical && maxLexical > 0 ? lexical.score / maxLexical : 0;
       const graphNorm = graphHit && maxEnergy > 0 ? graphHit.energy / maxEnergy : 0;
+      const termNorm = termHit && maxTermScore > 0 ? termHit.score / maxTermScore : 0;
+      const source: RecallHit["source"] =
+        lexical && graphHit ? "both" : lexical ? "lexical" : graphHit ? "graph" : "term";
       return {
         path,
         lexical,
         graphHit,
-        score: lexicalNorm + graphWeight * graphNorm,
-        source: (lexical && graphHit ? "both" : lexical ? "lexical" : "graph") as RecallHit["source"],
+        termHit,
+        score: lexicalNorm + graphWeight * graphNorm + termWeight * termNorm,
+        source,
       };
     })
     .sort((a, b) => b.score - a.score)
@@ -499,6 +543,7 @@ export async function recall(
         matchedTerms,
         lexicalScore: entry.lexical?.score ?? 0,
         ...(entry.graphHit && { graphEnergy: entry.graphHit.energy, via: entry.graphHit.via, hops: entry.graphHit.hops }),
+        ...(entry.termHit && { termScore: entry.termHit.score, learnedTerms: entry.termHit.terms }),
         ...(sessionBuffer?.has(entry.path) && { primed: true }),
       };
 

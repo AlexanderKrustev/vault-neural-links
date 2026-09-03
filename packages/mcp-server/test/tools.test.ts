@@ -379,6 +379,79 @@ describe("mcp-server tools", () => {
     expect(ctx.pendingRetrievals.has("Shell Aliases")).toBe(false);
   });
 
+  it("search_notes queues term learning for its hits, credited when one is read (VNL-053)", async () => {
+    await createNoteTool.handler(ctx)({ path: "Kill Process By Port", frontmatter: {}, body: "lsof and kill the pid" });
+
+    await searchNotesTool.handler(ctx)({ query: "kill process by port" });
+    expect(ctx.pendingTermRetrievals.get("Kill Process By Port")).toMatchObject({ trigger: "search-read" });
+    expect(ctx.pendingTermRetrievals.get("Kill Process By Port")!.terms).toEqual(
+      expect.arrayContaining(["kill", "process", "port"]),
+    );
+
+    await readNoteTool.handler(ctx)({ path: "Kill Process By Port" });
+    expect(ctx.pendingTermRetrievals.has("Kill Process By Port")).toBe(false);
+
+    await compactWeightsTool.handler(ctx)({});
+    const termWeights = JSON.parse(
+      await readFile(join(ctx.vaultDataDir, "term-weights.json"), "utf8"),
+    ) as { edges: Record<string, unknown> };
+    expect(Object.keys(termWeights.edges)).toEqual(
+      expect.arrayContaining(["kill|Kill Process By Port", "process|Kill Process By Port", "port|Kill Process By Port"]),
+    );
+  });
+
+  it("recall queues term learning from a hit's matched terms and credits it on read", async () => {
+    await createNoteTool.handler(ctx)({ path: "Kill Process By Port", frontmatter: {}, body: "lsof and kill the pid" });
+
+    const result = parseResult(await recallTool.handler(ctx)({ query: "kill process by port" }));
+    const matched = result.hits[0].why.matchedTerms as string[];
+    expect(matched.length).toBeGreaterThan(0);
+    expect(ctx.pendingTermRetrievals.get("Kill Process By Port")).toEqual({ terms: matched, trigger: "recall-read" });
+
+    await readNoteTool.handler(ctx)({ path: "Kill Process By Port" });
+    expect(ctx.pendingTermRetrievals.has("Kill Process By Port")).toBe(false);
+
+    await compactWeightsTool.handler(ctx)({});
+    const termWeights = JSON.parse(
+      await readFile(join(ctx.vaultDataDir, "term-weights.json"), "utf8"),
+    ) as { edges: Record<string, unknown> };
+    for (const term of matched) {
+      expect(termWeights.edges[`${term}|Kill Process By Port`]).toBeDefined();
+    }
+  });
+
+  it("crediting a recall hit that surfaced purely through a learned term reinforces that same term, not a text match it doesn't have", async () => {
+    await createNoteTool.handler(ctx)({ path: "Kill Process By Port", frontmatter: {}, body: "lsof and kill the pid" });
+    await createNoteTool.handler(ctx)({ path: "Unrelated Filler", frontmatter: {}, body: "nothing to do with any of this" });
+
+    // Seed a personal-shorthand association directly (the bootstrap this
+    // note could never reach through its own text) rather than through the
+    // tool round trip, mirroring core's termWeights coverage.
+    await appendEvent(ctx.vaultDataDir, "seed", {
+      ts: new Date().toISOString(),
+      instance: "seed",
+      type: "term",
+      from: "kpbp",
+      to: "Kill Process By Port",
+      weight_delta: 1,
+      trigger: "search-read",
+    });
+    await compactWeightsTool.handler(ctx)({});
+
+    const result = parseResult(await recallTool.handler(ctx)({ query: "kpbp" }));
+    expect(result.hits[0]).toMatchObject({ path: "Kill Process By Port", source: "term" });
+    expect(ctx.pendingTermRetrievals.get("Kill Process By Port")).toEqual({ terms: ["kpbp"], trigger: "recall-read" });
+
+    await readNoteTool.handler(ctx)({ path: "Kill Process By Port" });
+    await compactWeightsTool.handler(ctx)({});
+
+    const termWeights = JSON.parse(
+      await readFile(join(ctx.vaultDataDir, "term-weights.json"), "utf8"),
+    ) as { edges: Record<string, { traverseCount: number }> };
+    // Two term events now: the manually seeded one plus this credit.
+    expect(termWeights.edges["kpbp|Kill Process By Port"].traverseCount).toBe(2);
+  });
+
   it("search_notes finds a note by title without weight data", async () => {
     await createNoteTool.handler(ctx)({ path: "Apple Device Tips", frontmatter: {}, body: "" });
 
