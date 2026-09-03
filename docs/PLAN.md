@@ -24,10 +24,10 @@ This file is the single source of truth for what the project is doing, in what o
 | Engine beats plain text search | **Only on rank-1 count.** Engine 15/18 rank-1, mean rank 2.38; relevance-ranked text search 13/18 rank-1, mean rank **1.27** (better). |
 | "Memory gets more accurate the longer it runs" | **Not demonstrated.** Zeroing all usage weights gives the same 15/18. Ablating priming drops to 1/18. Both benchmark scripts pre-seed the session buffer with the target note, so the benchmark measures "the note I already read this session ranks first"; the distractor query also ranks #1 for the same reason. |
 | Signal exists to learn from | Barely. Real vault after 8 weeks: 474 notes, 122 usage edges, 144 traversals, 9 reinforcements, 4 consolidated edges. |
-| Safe to expose to an LLM | **No.** `read_note`/`create_note`/`list_notes` accept `../` and read/write/list outside the vault (confirmed over the MCP protocol). Activation WebSocket binds all interfaces with no auth. |
-| Safe to point at an existing Obsidian vault | **No.** Frontmatter parser handles only flat `key: scalar` and inline lists; Obsidian's default block-list `aliases:` becomes `""` and is written back on `update_note`. |
+| Safe to expose to an LLM | **Fixed 2026-09-03 (VNL-001, VNL-002).** Every path argument is contained by `resolveInsideVault()` plus a zod `.refine`, verified over the MCP protocol itself in `mcpIntegration.test.ts`; the activation WebSocket binds 127.0.0.1 only. It still has no auth, which is acceptable for a loopback-only feed. |
+| Safe to point at an existing Obsidian vault | **Fixed 2026-09-03 (VNL-003).** The parser handles block lists and nested maps, and a body-only `update_note` re-emits the frontmatter block verbatim, so anything the parser still doesn't understand survives a write untouched. |
 | Verified at 300k notes | Search only, on a synthetic small-vocabulary fixture. Content index is 8.5 MB for 471 real notes (≈5 GB extrapolated to 300k, above V8's string limit) and is re-parsed from disk on every query. Retrieval, autolink and the nightly pipeline were never measured at scale. |
-| Publishing is one token away | Mechanically yes (bundle verified, release workflow correct), but no changeset is pending so the first merge will not open a Version PR; server reports version `0.0.0`. |
+| Publishing is one token away | Yes, once the founder adds `NPM_TOKEN` (AIBRAIN-42). Changeset added and the server reports its real version as of 2026-09-03 (VNL-005/006). |
 | Obsidian store submission is a manual step away | No. `isDesktopOnly: false` is wrong (plugin requires Node `fs`), version `0.0.0`, no `versions.json`, raw `setInterval`, `console.log`. Would be rejected. |
 | Paid-from-launch plan is executable | 45 tickets of billing/legal/ops precede the first euro for a 3–4 EUR/month product; the price band is empty in the MCP market and 3–8x below every comparable Obsidian AI plugin. See investor memo. |
 
@@ -69,24 +69,24 @@ Effort figures are focused engineering time for one person, not calendar time.
 
 ### Phase 0 — Safety and honesty (before anything is published) · ~4 days
 
-Gate to exit: all items `done`, tests green, one MCP-client integration test exercising a traversal rejection.
+Gate to exit: all items `done`, tests green, one MCP-client integration test exercising a traversal rejection. **Met 2026-09-03** — 288 tests green (248 core, 40 mcp-server), all five packages typecheck, `test/mcpIntegration.test.ts` drives the real server over the SDK's in-memory transport.
 
 | ID | Item | Effort | Status |
 |---|---|---|---|
 | VNL-001 | **Vault containment for every path argument.** `resolveInsideVault()` in core (`path.resolve`, reject absolute, reject escape, reject `.vault-neural-links/` and `.obsidian/` targets), used by `toFilePath`, `listNotes`, `readNoteType`, `readSupersession`, autolink, desktop IPC; zod `.refine` in `tools.ts`; 6+ tests. | 4 h | done |
-| VNL-002 | **Activation socket binds loopback only** (`host: "127.0.0.1"`); socket bind failure must not kill the MCP server (socket is optional). | 1 h | todo |
-| VNL-003 | **Preserve frontmatter verbatim on body-only `update_note`.** Keep the raw frontmatter block and re-emit it unchanged unless frontmatter was explicitly supplied. Add block-list / nested-map fixtures. Longer term: adopt a real YAML parser (`yaml`). | 4 h | todo |
-| VNL-004 | **Compactor durability.** Rename each `events/*.jsonl` to `*.compacting` before reading so a live session's new appends land in a fresh file; per-line `try/catch` with quarantine of malformed lines; lock file so two compactors cannot double-fold; tests for all three. | 1 day | todo |
-| VNL-005 | Server `version` read from `package.json` (currently hardcoded `0.0.0`); drop sourcemap and empty `.d.ts` from the mcp-server tarball (75 KB → ~20 KB). | 30 min | todo |
-| VNL-006 | Add the first changeset so `release.yml` opens a Version PR on merge. | 10 min | todo |
-| VNL-007 | **MCP-client integration test** via the SDK in-memory transport: `tools/list` (11 tools), `read_note` round trip, `read_note ../x` rejected. | 2 h | todo |
-| VNL-008 | **Honest README/INSTALL**: scale claim limited to what was measured; add "exclude `.vault-neural-links/` from OneDrive/iCloud sync" (conflict copies were observed in the real vault); remove `reinforce_link` remnants from `compact_weights` description and `docs/claude-code-integration.md`; mark `docs/spec.md` superseded. | 1 h | todo |
-| VNL-009 | Delete own `session/*.json` and `activation-sockets/*.json` on SIGINT/SIGTERM/stdin close; nightly prune of orphaned session/retrieval/search files (84 stale session files observed). | 2 h | todo |
-| VNL-012 | Autolink: route the per-write scan through `readNodesInBatches` (bounded concurrency) and skip ambiguous titles (those `structuralLinks.ts` refuses to resolve) — the unbounded `Promise.all` is the same EMFILE pattern already fixed in search. Ambiguous-title half done 2026-09-03, plus path-form dedup, case-sensitive single-word matching and wikilink-span exclusion; batching still open. | 2 h | doing |
+| VNL-002 | **Activation socket binds loopback only** (`host: "127.0.0.1"`); socket bind failure must not kill the MCP server (socket is optional). | 1 h | done |
+| VNL-003 | **Preserve frontmatter verbatim on body-only `update_note`.** Keep the raw frontmatter block and re-emit it unchanged unless frontmatter was explicitly supplied. Add block-list / nested-map fixtures. Longer term: adopt a real YAML parser (`yaml`). | 4 h | done |
+| VNL-004 | **Compactor durability.** Rename each `events/*.jsonl` to `*.compacting` before reading so a live session's new appends land in a fresh file; per-line `try/catch` with quarantine of malformed lines; lock file so two compactors cannot double-fold; tests for all three. | 1 day | done |
+| VNL-005 | Server `version` read from `package.json` (currently hardcoded `0.0.0`); drop sourcemap and empty `.d.ts` from the mcp-server tarball (75 KB → ~20 KB, measured 19.2 KB). | 30 min | done |
+| VNL-006 | Add the first changeset so `release.yml` opens a Version PR on merge. | 10 min | done |
+| VNL-007 | **MCP-client integration test** via the SDK in-memory transport: `tools/list` (11 tools), `read_note` round trip, `read_note ../x` rejected. | 2 h | done |
+| VNL-008 | **Honest README/INSTALL**: scale claim limited to what was measured; add "exclude `.vault-neural-links/` from OneDrive/iCloud sync" (conflict copies were observed in the real vault); remove `reinforce_link` remnants from `compact_weights` description and `docs/claude-code-integration.md`; mark `docs/spec.md` superseded. | 1 h | done |
+| VNL-009 | Delete own `session/*.json` and `activation-sockets/*.json` on SIGINT/SIGTERM/stdin close; nightly prune of orphaned session/retrieval/search files (84 stale session files observed). | 2 h | done |
+| VNL-012 | Autolink: route the per-write scan through `readNodesInBatches` (bounded concurrency) and skip ambiguous titles (those `structuralLinks.ts` refuses to resolve) — the unbounded `Promise.all` is the same EMFILE pattern already fixed in search. Done 2026-09-03: ambiguous titles, path-form dedup, case-sensitive single-word matching, wikilink-span exclusion, and the batching half via a shared `readNotesInBatches`. | 2 h | done |
 
 ### Phase 1 — Publish and validate · weeks 1–2
 
-Gate to enter: Phase 0 done. Gate to exit (the validation decision, D1→D2): within 14 days of launch, **≥300 npm installs, ≥100 GitHub stars, ≥25 pre-order emails at the Pro price, ≥3 unsolicited messages describing the pain in the user's own words.** All four missed → go to §7 option E (keep as open-source project, stop investing in monetization). Two or more met → Phase 4 unlocks.
+Gate to enter: Phase 0 done — **met 2026-09-03**. Gate to exit (the validation decision, D1→D2): within 14 days of launch, **≥300 npm installs, ≥100 GitHub stars, ≥25 pre-order emails at the Pro price, ≥3 unsolicited messages describing the pain in the user's own words.** All four missed → go to §7 option E (keep as open-source project, stop investing in monetization). Two or more met → Phase 4 unlocks.
 
 | ID | Item | Effort | Status |
 |---|---|---|---|
@@ -136,7 +136,7 @@ Gate to exit: on the VNL-020 benchmark **with query text as input and an empty s
 
 ### Phase 3 — Performance and scale · weeks 3–10
 
-Gate to enter: Phase 0 done. Gate to exit: `search_notes`, `activate`, `create_note` each measured on a **real-vocabulary** corpus (Wikipedia-derived sample, AIBRAIN-111) at 50k and 300k notes, with numbers in the README.
+Gate to enter: Phase 0 done — **met 2026-09-03**. Gate to exit: `search_notes`, `activate`, `create_note` each measured on a **real-vocabulary** corpus (Wikipedia-derived sample, AIBRAIN-111) at 50k and 300k notes, with numbers in the README.
 
 | ID | Item | Effort | Status |
 |---|---|---|---|
@@ -394,6 +394,8 @@ Full descriptions and acceptance criteria are in [`BACKLOG-ARCHIVE.md`](BACKLOG-
 ---
 
 ## 9. Changelog
+
+- **2026-09-03 (Phase 0 complete)** — VNL-002/003/004/005/006/007/008/009/012 all `done`; the Phase 0 gate is met, which unlocks Phases 1 and 3 and makes Phase 2b the primary track. Highlights: the activation WebSocket binds loopback only and is now optional rather than fatal (VNL-002); `parseFrontmatter` understands Obsidian block lists and nested maps and, more importantly, keeps the block's source text so a body-only `update_note` re-emits it byte for byte (VNL-003); compaction takes an exclusive lock, claims its input files by renaming before reading, and quarantines corrupt lines instead of aborting (VNL-004); the server reports its real version and its tarball dropped 75 KB → 19.2 KB (VNL-005); the first changeset is in (VNL-006); an MCP-client integration test over the SDK's in-memory transport covers `tools/list`, a note round trip and containment refusals on every path-taking tool (VNL-007); README/INSTALL now state only what was measured and tell users to exclude `.vault-neural-links/` from file sync (VNL-008); per-instance session and socket files are deleted on shutdown and pruned nightly (VNL-009); the auto-link scan's unbounded `Promise.all` is gone (VNL-012). 288 tests green, all five packages typecheck, root build succeeds.
 
 - **2026-09-03 (later still)** — VNL-012 auto-link noise, second pass: a path-form link (`[[MOCs/X]]`) now counts as already linking the note titled `X`; a single-word term must match the note's own casing, so a note titled `Reports` no longer links itself into every note using the word in prose; and text inside an existing wikilink is no longer read as this note's prose. 7 more tests (22 in `autolink.test.ts`), 260 green.
 
