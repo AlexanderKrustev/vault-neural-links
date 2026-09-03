@@ -1,5 +1,11 @@
 # Vault Neural Links — Technical Spec
 
+> **Superseded.** This is the original design proposal, kept for history.
+> The current plan of record is [`PLAN.md`](PLAN.md); the current
+> architecture reference is Part 2 of
+> [`PLAN-AND-ARCHITECTURE.md`](PLAN-AND-ARCHITECTURE.md). Where this file
+> disagrees with either, they win.
+
 Weighted-link engine + visualization layer on top of an Obsidian vault, built for
 multi-instance Claude Code access. Wikilinks stay as the graph skeleton; a
 Hebbian-style weight layer tracks usage (co-traversal, reinforcement, decay) so

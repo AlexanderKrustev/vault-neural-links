@@ -53,6 +53,26 @@ the pipeline simply doesn't run on days the vault isn't opened in Obsidian.
 CLI fallbacks (e.g. headless/non-Obsidian setups) but are no longer part
 of the standard install.
 
+## 5. Exclude `.vault-neural-links/` from file sync
+
+If the vault lives in OneDrive, iCloud Drive, Dropbox or any other syncing
+folder, exclude `<vault>/.vault-neural-links/` from that sync.
+
+This folder holds the engine's own append-only event logs and index files,
+which are rewritten constantly and are strictly local runtime state — a
+sync client racing those writes produces `... (1).json` / `-conflict`
+copies, which is exactly what was observed in a real vault. Nothing in it
+is worth syncing: it is rebuilt from the notes themselves, and deleting it
+leaves you with a plain Obsidian vault.
+
+- **OneDrive**: right-click the folder → *Always keep on this device* off
+  is **not** enough; use *Settings → Sync and backup → Advanced settings →
+  Excluded folders*, or keep the vault outside OneDrive entirely.
+- **Dropbox**: *Preferences → Sync → Selective sync* → untick it.
+- **iCloud Drive**: append `.nosync` to the folder name is not viable here
+  (the engine writes to the literal path), so keep the vault outside
+  iCloud Drive if you need this.
+
 ---
 
 ## Build from source (works today)
@@ -107,6 +127,10 @@ In Obsidian: **Settings → Community plugins** → turn off Restricted mode
 ### 6. Nightly pipeline
 
 Same as step 4 above — no separate setup needed either way.
+
+### 7. Exclude `.vault-neural-links/` from file sync
+
+Same as step 5 above; it applies to every install path.
 
 ## Not covered here
 

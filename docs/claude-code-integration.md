@@ -12,8 +12,11 @@ const link = initInstance(vaultPath); // instanceId auto-generated if omitted
 // call once per linked note the session reads, immediately after reading it
 await link.logTraversal(fromNotePath, toNotePath);
 
-// call when the user explicitly signals a link matters
-await link.reinforce(fromNotePath, toNotePath, boost);
+// Reinforcement is automatic — reading a note that surfaced in this
+// session's most recent activate()/getWeightedNeighbors() result reinforces
+// that link by itself. There is no reinforce_link MCP tool: it was removed
+// (AIBRAIN-66/69) because a couple of calls could force any note to rank
+// first regardless of relevance.
 
 // ranking neighbors when deciding what to open next
 const neighbors = await link.getWeightedNeighbors(currentNotePath, 5);

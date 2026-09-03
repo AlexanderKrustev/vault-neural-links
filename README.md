@@ -36,15 +36,23 @@ now, not just what's technically connected.
 - **Spreading activation** — `activate` follows that weighted graph
   outward across multiple hops, so a note only indirectly connected
   through an intermediate note can still surface.
-- **Fast at scale** — a persisted content index and structural index mean
-  search and retrieval don't re-scan the whole vault on every call;
-  verified against a 300,000-note vault, not just small ones.
+- **Persisted indexes** — a content index and a structural index mean
+  `search_notes` doesn't re-scan the whole vault on every call. What has
+  actually been measured: search against a **synthetic** 300,000-note
+  corpus with a small vocabulary. Retrieval (`activate`), auto-linking and
+  the nightly pipeline have *not* been measured at that size, and the
+  content index is a single JSON file re-read per query — expect it to be
+  the limit well before 300k real notes. A SQLite-backed store is the
+  planned fix (`docs/PLAN.md`, VNL-031).
 - **Plain-text audit trail** — every write appends a human-readable line to
   `changes.jsonl`. No git dependency — your vault doesn't need to be a git
   repo for any of this to work.
 - **Zero lock-in** — runtime data lives inside your vault
   (`.vault-neural-links/`), not in some external database. Delete the
-  folder and you're back to a plain Obsidian vault.
+  folder and you're back to a plain Obsidian vault. Exclude that folder
+  from OneDrive/iCloud/Dropbox sync — it is rewritten constantly, and a
+  sync client racing those writes leaves conflict copies (see
+  [INSTALL.md](INSTALL.md) step 5).
 
 ## Install
 
