@@ -395,7 +395,7 @@ Full descriptions and acceptance criteria are in [`BACKLOG-ARCHIVE.md`](BACKLOG-
 
 ## 9. Changelog
 
-- **2026-09-03** — VNL-001 done: `resolveInsideVault`/`resolveNoteFile`/`assertVaultRelativePath` added in `packages/core/src/vaultPaths.ts` and wired into `toFilePath`, `listNotes`, `readNoteType`, `readSupersession` and the desktop IPC note handlers; every path argument in `tools.ts` now carries a zod `.refine`. 20 new tests (15 core, 5 mcp-server); 247 tests green, all five packages typecheck. Autolink is covered transitively (it only takes paths from `listNotes` and writes through `writeNote`).
+- **2026-09-03** — VNL-001 done: `resolveInsideVault`/`resolveNoteFile`/`assertVaultRelativePath` added in `packages/core/src/vaultPaths.ts` and wired into `toFilePath`, `listNotes`, `readNoteType`, `readSupersession` and the desktop IPC note handlers; every path argument in `tools.ts` now carries a zod `.refine`. 20 new tests (15 core, 5 mcp-server); 247 tests green, all five packages typecheck. Autolink is covered transitively (it only takes paths from `listNotes` and writes through `writeNote`). The rule and its rationale are in the vault: `Notes/VaultNeuralLinks/Vault Path Containment Rule`.
 
 - **2026-09-02 (later still)** — Founder confirmed D10 and the Phase 2b priority order; Phase 2b is the primary track after Phase 0.
 - **2026-09-02 (later)** — Founder confirmed D1–D9. D10 added (engine usefulness thesis) with Phase 2b items VNL-050..057 as the priority track; see §3 Phase 2b and analysis report addendum.
