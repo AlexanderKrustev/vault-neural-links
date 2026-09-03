@@ -27,6 +27,13 @@ export interface NoteRef {
   path: string; // vault-relative, without .md extension
   frontmatter: Record<string, unknown>;
   body: string;
+  /**
+   * The note's frontmatter block verbatim (VNL-003). Pass it back to
+   * `writeNote`/`writeNoteWithAutoLink` on a body-only edit so the block is
+   * re-emitted unchanged; omit it when the frontmatter itself is being
+   * rewritten. See `ParsedNote.raw`.
+   */
+  rawFrontmatter?: string;
 }
 
 export function toFilePath(vaultPath: string, notePath: string): string {
@@ -42,8 +49,8 @@ function toNotePath(vaultPath: string, filePath: string): string {
 export async function readNote(vaultPath: string, notePath: string): Promise<NoteRef | null> {
   try {
     const raw = await readFile(toFilePath(vaultPath, notePath), "utf8");
-    const { frontmatter, body } = parseFrontmatter(raw);
-    return { path: notePath, frontmatter, body };
+    const { frontmatter, body, raw: rawFrontmatter } = parseFrontmatter(raw);
+    return { path: notePath, frontmatter, body, rawFrontmatter };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;

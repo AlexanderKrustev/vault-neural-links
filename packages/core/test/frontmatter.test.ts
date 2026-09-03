@@ -38,6 +38,55 @@ describe("frontmatter", () => {
     expect(result).toContain('aliases: ["Smith, John"]');
   });
 
+  it("parses an Obsidian block-list aliases: into an array (VNL-003)", () => {
+    const content = "---\naliases:\n  - First Alias\n  - Second Alias\ntype: atomic\n---\nbody";
+    const { frontmatter } = parseFrontmatter(content);
+
+    expect(frontmatter.aliases).toEqual(["First Alias", "Second Alias"]);
+    expect(frontmatter.type).toBe("atomic");
+  });
+
+  it("parses a block list written flush with its key, as Obsidian also emits it", () => {
+    const content = "---\ntags:\n- one\n- two\nstatus: open\n---\nbody";
+    const { frontmatter } = parseFrontmatter(content);
+
+    expect(frontmatter.tags).toEqual(["one", "two"]);
+    expect(frontmatter.status).toBe("open");
+  });
+
+  it("parses a nested map", () => {
+    const content = "---\nmetadata:\n  type: project\n  pinned: true\nid: 7\n---\nbody";
+    const { frontmatter } = parseFrontmatter(content);
+
+    expect(frontmatter.metadata).toEqual({ type: "project", pinned: true });
+    expect(frontmatter.id).toBe(7);
+  });
+
+  it("re-emits the frontmatter block verbatim on a body-only write (VNL-003)", () => {
+    const content =
+      "---\naliases:\n  - First Alias\n# a comment the parser knows nothing about\nnested:\n  a:\n    deep: 1\n---\nold body\n";
+    const parsed = parseFrontmatter(content);
+
+    const rewritten = serializeNote({ ...parsed, body: "\nnew body\n" });
+
+    expect(rewritten).toBe(
+      "---\naliases:\n  - First Alias\n# a comment the parser knows nothing about\nnested:\n  a:\n    deep: 1\n---\n\nnew body\n",
+    );
+  });
+
+  it("uses the supplied frontmatter when raw is dropped, i.e. frontmatter was edited", () => {
+    const parsed = parseFrontmatter("---\ntype: atomic\n---\nbody");
+    const rewritten = serializeNote({ frontmatter: { type: "moc" }, body: parsed.body });
+
+    expect(rewritten).toBe("---\ntype: moc\n---\n\nbody");
+  });
+
+  it("stringifies a nested map as a block map", () => {
+    expect(stringifyFrontmatter({ metadata: { type: "project" }, id: 7 })).toBe(
+      "---\nmetadata:\n  type: project\nid: 7\n---\n",
+    );
+  });
+
   it("round-trips a wikilink-shaped string value instead of misparsing it as an array", () => {
     const serialized = serializeNote({ frontmatter: { superseded_by: "[[New Note]]" }, body: "" });
     const { frontmatter } = parseFrontmatter(serialized);

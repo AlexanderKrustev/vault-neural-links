@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import {
@@ -43,8 +43,35 @@ describe("activationSocket", () => {
 
     const registrationPath = activationSocketRegistrationPath(vaultDataDir, "inst-1");
     const registration = JSON.parse(await readFile(registrationPath, "utf8"));
-    expect(registration).toMatchObject({ port: server.port, pid: process.pid });
+    expect(registration).toMatchObject({
+      host: "127.0.0.1",
+      port: server.port,
+      pid: process.pid,
+    });
     expect(typeof registration.startedAt).toBe("string");
+  });
+
+  it("binds loopback only, so a non-loopback local address is refused (VNL-002)", async () => {
+    server = await startActivationSocketServer(vaultDataDir, "inst-loopback");
+    expect(server.host).toBe("127.0.0.1");
+
+    const external = networkInterfaces();
+    const externalAddress = Object.values(external)
+      .flatMap((entries) => entries ?? [])
+      .find((entry) => entry.family === "IPv4" && !entry.internal)?.address;
+    if (externalAddress === undefined) {
+      // A machine with no non-loopback IPv4 address can't distinguish the two
+      // binds; the host assertion above is all this environment can check.
+      return;
+    }
+
+    const client = new WebSocket(`ws://${externalAddress}:${server.port}`);
+    const failure = await new Promise<Error | null>((resolve) => {
+      client.once("open", () => resolve(null));
+      client.once("error", (error) => resolve(error));
+    });
+    client.close();
+    expect(failure).not.toBeNull();
   });
 
   it("a connected client receives a broadcast message", async () => {

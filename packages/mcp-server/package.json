@@ -13,7 +13,6 @@
   },
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "bin": {
     "vnl-mcp": "./dist/index.js"
   },

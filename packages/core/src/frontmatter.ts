@@ -1,38 +1,144 @@
 /**
- * Minimal frontmatter parse/stringify for the flat scalar/array shapes this
- * vault actually uses (strings, numbers, booleans, string arrays). Not a
+ * Minimal frontmatter parse/stringify for the shapes an Obsidian vault
+ * actually uses: flat scalars, inline arrays, block sequences (`aliases:`
+ * followed by indented `- item` lines) and one level of nested map. Not a
  * general YAML implementation — schema shape is a prompt-level concern
  * (see the vault-memory skill), this just needs to round-trip what's here.
+ *
+ * VNL-003: because it is not a full YAML parser, anything it *does* fail to
+ * understand must still survive a write. `parseFrontmatter` therefore keeps
+ * the frontmatter block's exact source text in `raw`, and `serializeNote`
+ * re-emits that text verbatim unless a caller explicitly supplies new
+ * frontmatter. A body-only `update_note` can no longer silently rewrite a
+ * user's frontmatter into the parser's own dialect.
  */
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 export interface ParsedNote {
   frontmatter: Record<string, unknown>;
   body: string;
+  /**
+   * The frontmatter block's source text, without the `---` fences and
+   * without a trailing newline. Present only when the note had a
+   * frontmatter block. Callers that mean to *change* frontmatter drop this;
+   * callers that only touch the body pass it through so the block is
+   * re-emitted byte for byte.
+   */
+  raw?: string;
 }
 
 export function parseFrontmatter(content: string): ParsedNote {
   const match = content.match(FRONTMATTER_RE);
   if (!match) return { frontmatter: {}, body: content };
 
-  const frontmatter: Record<string, unknown> = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    const parsed = parseLine(line);
-    if (parsed) frontmatter[parsed.key] = parsed.value;
-  }
+  const lines = match[1].split(/\r?\n/);
+  const { value } = parseMap(lines, 0, indentOf(lines[0] ?? ""));
 
-  return { frontmatter, body: content.slice(match[0].length) };
+  return { frontmatter: value, body: content.slice(match[0].length), raw: match[1] };
 }
 
-function parseLine(line: string): { key: string; value: unknown } | undefined {
-  const colonIdx = line.indexOf(":");
+function indentOf(line: string): number {
+  return line.length - line.trimStart().length;
+}
+
+function isBlank(line: string): boolean {
+  return line.trim() === "" || line.trimStart().startsWith("#");
+}
+
+/**
+ * Parses consecutive `key: value` lines at exactly `indent`, descending into
+ * a nested block sequence or block map wherever the value is empty.
+ * Returns the index of the first line that no longer belongs to this map.
+ */
+function parseMap(
+  lines: string[],
+  start: number,
+  indent: number,
+): { value: Record<string, unknown>; next: number } {
+  const value: Record<string, unknown> = {};
+  let i = start;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (isBlank(line)) {
+      i += 1;
+      continue;
+    }
+    if (indentOf(line) !== indent) break;
+
+    const parsed = parseLine(line);
+    if (!parsed) break;
+    i += 1;
+
+    if (parsed.rawValue === "") {
+      const child = parseChildBlock(lines, i, indent);
+      if (child) {
+        value[parsed.key] = child.value;
+        i = child.next;
+        continue;
+      }
+    }
+    value[parsed.key] = parseScalarOrArray(parsed.rawValue);
+  }
+
+  return { value, next: i };
+}
+
+/** A block sequence or nested map indented deeper than its parent key. */
+function parseChildBlock(
+  lines: string[],
+  start: number,
+  parentIndent: number,
+): { value: unknown; next: number } | undefined {
+  let i = start;
+  while (i < lines.length && isBlank(lines[i])) i += 1;
+  if (i >= lines.length) return undefined;
+
+  const childIndent = indentOf(lines[i]);
+  // Obsidian writes block sequences flush with the parent key, so `- item`
+  // at the parent's own indentation is still this key's list.
+  const isSequence = lines[i].trimStart().startsWith("- ");
+  if (!isSequence && childIndent <= parentIndent) return undefined;
+  if (isSequence && childIndent < parentIndent) return undefined;
+
+  if (isSequence) return parseSequence(lines, i, childIndent);
+  return parseMap(lines, i, childIndent);
+}
+
+function parseSequence(
+  lines: string[],
+  start: number,
+  indent: number,
+): { value: unknown[]; next: number } {
+  const value: unknown[] = [];
+  let i = start;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (isBlank(line)) {
+      i += 1;
+      continue;
+    }
+    const trimmed = line.trimStart();
+    if (indentOf(line) !== indent || !trimmed.startsWith("- ")) break;
+    value.push(parseScalar(trimmed.slice(2).trim()));
+    i += 1;
+  }
+
+  return { value, next: i };
+}
+
+function parseLine(line: string): { key: string; rawValue: string } | undefined {
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith("- ")) return undefined;
+
+  const colonIdx = trimmed.indexOf(":");
   if (colonIdx === -1) return undefined;
 
-  const key = line.slice(0, colonIdx).trim();
-  const rawValue = line.slice(colonIdx + 1).trim();
+  const key = trimmed.slice(0, colonIdx).trim();
   if (!key) return undefined;
 
-  return { key, value: parseScalarOrArray(rawValue) };
+  return { key, rawValue: trimmed.slice(colonIdx + 1).trim() };
 }
 
 function parseScalarOrArray(raw: string): unknown {
@@ -91,8 +197,20 @@ function unquote(value: string): string {
 }
 
 export function stringifyFrontmatter(frontmatter: Record<string, unknown>): string {
-  const lines = Object.entries(frontmatter).map(([key, value]) => `${key}: ${stringifyValue(value)}`);
-  return `---\n${lines.join("\n")}\n---\n`;
+  return `---\n${stringifyEntries(frontmatter, "").join("\n")}\n---\n`;
+}
+
+function stringifyEntries(frontmatter: Record<string, unknown>, indent: string): string[] {
+  return Object.entries(frontmatter).flatMap(([key, value]) => {
+    if (isPlainObject(value)) {
+      return [`${indent}${key}:`, ...stringifyEntries(value, `${indent}  `)];
+    }
+    return [`${indent}${key}: ${stringifyValue(value)}`];
+  });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function stringifyValue(value: unknown): string {
@@ -110,7 +228,11 @@ function stringifyArrayItem(value: unknown): string {
 }
 
 export function serializeNote(note: ParsedNote): string {
-  const fm = stringifyFrontmatter(note.frontmatter);
+  // VNL-003: `raw` wins over the parsed object. It is only ever set by
+  // `parseFrontmatter`, so its presence means "this block came off disk and
+  // nobody asked to change it" — re-emit it exactly, including block lists,
+  // nested maps, comments and key order the parser cannot reproduce.
+  const fm = note.raw !== undefined ? `---\n${note.raw}\n---\n` : stringifyFrontmatter(note.frontmatter);
   const body = note.body.startsWith("\n") ? note.body : `\n${note.body}`;
   return `${fm}${body}`;
 }

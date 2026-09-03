@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { startActivationSocketServer } from "./activationSocket.js";
@@ -28,7 +29,19 @@ if (!vaultPath) {
 
 const instanceId = `mcp-${randomUUID()}`;
 const ctx = makeToolContext(vaultPath, instanceId);
-ctx.activationSocket = await startActivationSocketServer(ctx.vaultDataDir, instanceId);
+
+// VNL-002: the activation socket is an optional convenience for the Obsidian
+// plugin's live graph. A bind failure (no loopback, a sandbox that forbids
+// listening, an exhausted descriptor table) must not take the MCP server
+// down with it — the tools all work without it.
+try {
+  ctx.activationSocket = await startActivationSocketServer(ctx.vaultDataDir, instanceId);
+} catch (error) {
+  console.error(
+    "vault-neural-link MCP server: activation socket unavailable, continuing without " +
+      `the live graph feed (${error instanceof Error ? error.message : String(error)})`,
+  );
+}
 
 // The nightly compact/consolidate/reindex/importance/cluster pipeline is no
 // longer triggered from here — Obsidian is now the sole scheduler (see
@@ -42,9 +55,14 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
+// VNL-005: report the real published version rather than a hardcoded 0.0.0.
+// `dist/index.js` and `src/index.ts` are both one directory below the package
+// root, so the same relative path works for the bundle and for tests.
+const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
+
 const server = new McpServer({
   name: "vault-neural-link",
-  version: "0.0.0",
+  version,
 });
 
 server.registerTool(getWeightedNeighborsTool.name, getWeightedNeighborsTool.config, getWeightedNeighborsTool.handler(ctx));

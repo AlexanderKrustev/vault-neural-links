@@ -3,9 +3,12 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
-  dts: true,
+  // VNL-005: this package ships an executable (`vnl-mcp`), not a library —
+  // nobody imports its types, and the sourcemap tripled the tarball. Both are
+  // off so the published artifact stays ~20 KB.
+  dts: false,
   clean: true,
-  sourcemap: true,
+  sourcemap: false,
   // AIBRAIN-41: "@vault-neural-links/core": "*" only resolves via the npm
   // workspace symlink during a monorepo build — it would not resolve at
   // all for a user who installs @vault-neural-links/mcp-server standalone

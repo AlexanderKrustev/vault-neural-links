@@ -389,7 +389,16 @@ export const updateNoteTool = {
       }
 
       const newBody = appendOpts ? appendUnderHeading(existing.body, appendOpts) : body ?? existing.body;
-      const result = await writeNoteWithAutoLink(ctx.vaultPath, path, existing.frontmatter, newBody, "update");
+      // VNL-003: update_note never edits frontmatter, so the block goes back
+      // to disk verbatim rather than through the minimal YAML writer.
+      const result = await writeNoteWithAutoLink(
+        ctx.vaultPath,
+        path,
+        existing.frontmatter,
+        newBody,
+        "update",
+        existing.rawFrontmatter,
+      );
       return textResult({ updated: true, ...result });
     },
 };

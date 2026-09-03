@@ -149,14 +149,21 @@ export async function writeNoteWithAutoLink(
   frontmatter: Record<string, unknown>,
   body: string,
   action: "create" | "update",
+  /**
+   * The existing note's verbatim frontmatter block, for a body-only edit
+   * (VNL-003). When given it is re-emitted unchanged and `frontmatter` is
+   * used only by callers that inspect it; omit it when the frontmatter is
+   * itself being written.
+   */
+  rawFrontmatter?: string,
 ): Promise<{ path: string; autoLinked: string[] }> {
   if (isTemplatePath(notePath)) {
-    await writeNote(vaultPath, notePath, { frontmatter, body });
+    await writeNote(vaultPath, notePath, { frontmatter, body, raw: rawFrontmatter });
     return { path: notePath, autoLinked: [] };
   }
 
   const linked = await autoLinkScan(vaultPath, notePath, body);
-  await writeNote(vaultPath, notePath, { frontmatter, body: linked.content });
+  await writeNote(vaultPath, notePath, { frontmatter, body: linked.content, raw: rawFrontmatter });
 
   await appendChangelogEntry(vaultPath, {
     action,

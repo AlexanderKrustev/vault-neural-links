@@ -367,7 +367,14 @@ app.whenReady().then(async () => {
       if (!isVaultRelativePath(notePath)) return { ok: false, error: `"${notePath}" is not a valid vault-relative note path.` };
       const existing = await readNote(folderPath, notePath);
       if (!existing) return { ok: false, error: `No note found at "${notePath}".` };
-      const result = await writeNoteWithAutoLink(folderPath, notePath, existing.frontmatter, body, "update");
+      const result = await writeNoteWithAutoLink(
+        folderPath,
+        notePath,
+        existing.frontmatter,
+        body,
+        "update",
+        existing.rawFrontmatter, // VNL-003: body-only edit, keep the block verbatim
+      );
       return { ok: true, ...result };
     },
   );

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "@vault-neural-links/core";
@@ -264,6 +264,27 @@ describe("mcp-server tools", () => {
 
     const missing = parseResult(await updateNoteTool.handler(ctx)({ path: "Nope", body: "x" }));
     expect(missing.error).toMatch(/No note found/);
+  });
+
+  it("update_note leaves a hand-written frontmatter block byte-identical (VNL-003)", async () => {
+    const frontmatterBlock =
+      "---\n" +
+      "aliases:\n" +
+      "  - First Alias\n" +
+      "  - Second Alias\n" +
+      "# a comment Obsidian users do write\n" +
+      "cssclasses: []\n" +
+      "nested:\n" +
+      "  a:\n" +
+      "    deep: 1\n" +
+      "---\n";
+    await writeFile(join(vaultPath, "Foo.md"), `${frontmatterBlock}\nv1\n`, "utf8");
+
+    await updateNoteTool.handler(ctx)({ path: "Foo", body: "v2" });
+
+    const onDisk = await readFile(join(vaultPath, "Foo.md"), "utf8");
+    expect(onDisk.startsWith(frontmatterBlock)).toBe(true);
+    expect(onDisk).toContain("v2");
   });
 
   it("update_note supports appendUnderHeading, most-recent-first", async () => {
