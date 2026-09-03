@@ -44,6 +44,16 @@ now, not just what's technically connected.
   content index is a single JSON file re-read per query — expect it to be
   the limit well before 300k real notes. A SQLite-backed store is the
   planned fix (`docs/PLAN.md`, VNL-031).
+- **Learns from your own navigation, not just the AI's** — with the
+  Obsidian plugin installed, opening one note after another (and editing
+  the note you navigated to) records a low-weight edge in the same local
+  event log the MCP server writes. This is what keeps the graph from
+  starving: agent traffic alone measured about two events a day in a real
+  vault. **What this records:** the paths of notes you open in sequence and
+  edit, with timestamps, written to `.vault-neural-links/events/` inside
+  your own vault. No note content, no network calls, nothing sent anywhere,
+  no telemetry. Turn it off in the plugin's settings ("Learn from my
+  navigation"), or delete the folder to erase it.
 - **Plain-text audit trail** — every write appends a human-readable line to
   `changes.jsonl`. No git dependency — your vault doesn't need to be a git
   repo for any of this to work.

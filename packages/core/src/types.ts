@@ -1,9 +1,49 @@
 export type EventType = "traverse" | "reinforce" | "decay";
 
-/** What actually caused a "traverse" event — read_note's automatic logging, or log_traversal's manual-credit escape hatch (AIBRAIN-72). */
-export type TraversalTrigger = "read" | "manual";
-/** What actually caused a "reinforce" event — an explicit reinforce_link call, or AIBRAIN-71's automatic retrieval-then-read correlation. */
-export type ReinforceTrigger = "explicit" | "auto-retrieval";
+/**
+ * What actually caused a "traverse" event — read_note's automatic logging,
+ * log_traversal's manual-credit escape hatch (AIBRAIN-72), or the human
+ * opening one note after another inside Obsidian (VNL-052).
+ */
+export type TraversalTrigger = "read" | "manual" | "human-open";
+/**
+ * What actually caused a "reinforce" event — an explicit reinforce_link call,
+ * AIBRAIN-71's automatic retrieval-then-read correlation, or the human
+ * editing the note they navigated to inside Obsidian (VNL-052).
+ */
+export type ReinforceTrigger = "explicit" | "auto-retrieval" | "human-edit";
+
+/**
+ * Tuning for the Obsidian plugin's human-navigation sensor (VNL-052).
+ *
+ * The weights are deliberately far below an agent traversal's 1: the human
+ * generates on the order of a hundred times more events than the agent does,
+ * so at parity the graph would stop being about what was deliberately
+ * retrieved and become a heat map of what was clicked. An edit counts for
+ * more than an open because writing in a note is the strongest evidence of
+ * engagement the plugin can observe without reading content.
+ *
+ * These are an opening position, not a measurement — VNL-020's benchmark is
+ * where they get earned or changed.
+ */
+export interface HumanSignalConfig {
+  /** Two opens further apart than this are separate visits, not one act of navigation. */
+  coOpenWindowMs: number;
+  /** Minimum gap between two "human-open" events for the same pair of notes. */
+  pairThrottleMs: number;
+  /** Minimum gap between two "human-edit" events for the same pair of notes. */
+  editThrottleMs: number;
+  openWeight: number;
+  editWeight: number;
+}
+
+export const DEFAULT_HUMAN_SIGNAL_CONFIG: HumanSignalConfig = {
+  coOpenWindowMs: 10 * 60 * 1000,
+  pairThrottleMs: 60 * 1000,
+  editThrottleMs: 5 * 60 * 1000,
+  openWeight: 0.25,
+  editWeight: 0.5,
+};
 
 export interface EventLogEntry {
   ts: string;
@@ -485,9 +525,16 @@ export interface UsageReportSession {
 }
 
 export interface UsageReportMechanismCounts {
+  /** Agent-side traversals only (read_note auto-logging and log_traversal) — see `human` for the plugin's. */
   traverse: number;
   /** Split by trigger (AIBRAIN-71) so the report can tell explicit reinforce_link use apart from automatic retrieval-then-read reinforcement. */
   reinforce: { explicit: number; autoRetrieval: number };
+  /**
+   * Events contributed by the human moving around Obsidian (VNL-052), kept
+   * apart from the agent's counts above: the two have different volumes and
+   * different per-event weights, and mixing them would make both unreadable.
+   */
+  human: { opens: number; edits: number };
   activate: { activation: number; keyword: number; recency: number };
   /** get_weighted_neighbors() call count (AIBRAIN-126) — previously invisible to this report since the tool logged nothing. */
   getWeightedNeighbors: number;

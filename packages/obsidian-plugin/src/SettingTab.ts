@@ -24,6 +24,25 @@ export class VaultNeuralLinksSettingTab extends PluginSettingTab {
       accountStatus.setDesc(this.describeAccountAuth(state));
     });
 
+    // VNL-052. Worth being plain about what this records, since it is the
+    // user's own navigation history: it stays in the vault folder, it is
+    // never sent anywhere, and deleting `.vault-neural-links/` removes it.
+    new Setting(containerEl)
+      .setName("Learn from my navigation")
+      .setDesc(
+        "Record which notes you open one after another, and which you edit, so the weighted " +
+          "graph learns from how you actually use the vault and not only from what the AI " +
+          "assistant reads. Saved to .vault-neural-links/ inside this vault — nothing is sent " +
+          "anywhere. Turning this on takes effect after Obsidian reloads.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.logHumanNavigation).onChange((value) => {
+          this.plugin.settings.logHumanNavigation = value;
+          void this.plugin.saveSettings();
+          this.plugin.startHumanActivityWatcher();
+        }),
+      );
+
     new Setting(containerEl)
       .setName("Minimum edge weight")
       .setDesc(

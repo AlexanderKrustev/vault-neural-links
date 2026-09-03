@@ -51,6 +51,7 @@ describe("computeUsageReport", () => {
     expect(report.mechanismCounts).toEqual({
       traverse: 0,
       reinforce: { explicit: 0, autoRetrieval: 0 },
+      human: { opens: 0, edits: 0 },
       activate: { activation: 0, keyword: 0, recency: 0 },
       getWeightedNeighbors: 0,
       search: 0,

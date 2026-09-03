@@ -70,6 +70,7 @@ export {
   type AccountSession,
 } from "./accountSession.js";
 export { computeUsageReport } from "./usageReport.js";
+export { HumanNavigationTracker } from "./humanSignal.js";
 export * from "./frontmatter.js";
 export * from "./notes.js";
 export * from "./autolink.js";

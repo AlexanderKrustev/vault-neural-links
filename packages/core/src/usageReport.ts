@@ -69,6 +69,8 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
   let traverseCount = 0;
   let reinforceExplicitCount = 0;
   let reinforceAutoCount = 0;
+  let humanOpenCount = 0;
+  let humanEditCount = 0;
   let searchCount = 0;
   let getWeightedNeighborsCount = 0;
   const activateTierCounts = { activation: 0, keyword: 0, recency: 0 };
@@ -92,7 +94,13 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
     });
 
     for (const event of events) {
-      if (event.type === "traverse") traverseCount++;
+      // VNL-052: the plugin's human-navigation events share this log but are
+      // counted on their own axis — they are ~100x more numerous and carry a
+      // much smaller weight each, so folding them into traverse/reinforce
+      // would drown the agent-side numbers this report exists to show.
+      if (event.trigger === "human-open") humanOpenCount++;
+      else if (event.trigger === "human-edit") humanEditCount++;
+      else if (event.type === "traverse") traverseCount++;
       else if (event.type === "reinforce") {
         // Missing trigger means this event predates AIBRAIN-71's field — it can only have come from an explicit reinforce_link call.
         if (event.trigger === "auto-retrieval") reinforceAutoCount++;
@@ -171,6 +179,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
     mechanismCounts: {
       traverse: traverseCount,
       reinforce: { explicit: reinforceExplicitCount, autoRetrieval: reinforceAutoCount },
+      human: { opens: humanOpenCount, edits: humanEditCount },
       activate: activateTierCounts,
       getWeightedNeighbors: getWeightedNeighborsCount,
       search: searchCount,
