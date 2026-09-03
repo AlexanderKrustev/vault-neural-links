@@ -82,7 +82,7 @@ Gate to exit: all items `done`, tests green, one MCP-client integration test exe
 | VNL-007 | **MCP-client integration test** via the SDK in-memory transport: `tools/list` (11 tools), `read_note` round trip, `read_note ../x` rejected. | 2 h | todo |
 | VNL-008 | **Honest README/INSTALL**: scale claim limited to what was measured; add "exclude `.vault-neural-links/` from OneDrive/iCloud sync" (conflict copies were observed in the real vault); remove `reinforce_link` remnants from `compact_weights` description and `docs/claude-code-integration.md`; mark `docs/spec.md` superseded. | 1 h | todo |
 | VNL-009 | Delete own `session/*.json` and `activation-sockets/*.json` on SIGINT/SIGTERM/stdin close; nightly prune of orphaned session/retrieval/search files (84 stale session files observed). | 2 h | todo |
-| VNL-012 | Autolink: route the per-write scan through `readNodesInBatches` (bounded concurrency) and skip ambiguous titles (those `structuralLinks.ts` refuses to resolve) — the unbounded `Promise.all` is the same EMFILE pattern already fixed in search. | 2 h | todo |
+| VNL-012 | Autolink: route the per-write scan through `readNodesInBatches` (bounded concurrency) and skip ambiguous titles (those `structuralLinks.ts` refuses to resolve) — the unbounded `Promise.all` is the same EMFILE pattern already fixed in search. Ambiguous-title half done 2026-09-03; batching still open. | 2 h | doing |
 
 ### Phase 1 — Publish and validate · weeks 1–2
 
@@ -394,6 +394,8 @@ Full descriptions and acceptance criteria are in [`BACKLOG-ARCHIVE.md`](BACKLOG-
 ---
 
 ## 9. Changelog
+
+- **2026-09-03 (later)** — VNL-012 ambiguous-title half done: `autoLinkScan` now links a title or alias only when it uniquely identifies one note, mirroring `buildStructuralIndex`'s existing rule. Found in practice — writing one vault note appended 27 auto-links, 20 of them identical dead `[[Index]]` links. 6 new tests. The bounded-concurrency half of VNL-012 is still open, so the row stays `doing`.
 
 - **2026-09-03** — VNL-001 done: `resolveInsideVault`/`resolveNoteFile`/`assertVaultRelativePath` added in `packages/core/src/vaultPaths.ts` and wired into `toFilePath`, `listNotes`, `readNoteType`, `readSupersession` and the desktop IPC note handlers; every path argument in `tools.ts` now carries a zod `.refine`. 20 new tests (15 core, 5 mcp-server); 247 tests green, all five packages typecheck. Autolink is covered transitively (it only takes paths from `listNotes` and writes through `writeNote`). The rule and its rationale are in the vault: `Notes/VaultNeuralLinks/Vault Path Containment Rule`.
 

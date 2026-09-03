@@ -110,4 +110,68 @@ describe("autoLinkScan", () => {
     expect(result.content.endsWith("## Related (auto-linked)\n- [[Target]]\n")).toBe(true);
     expect(result.content).toContain("'## Related (auto-linked)' convention in prose.\n");
   });
+
+  // VNL-012: a bare [[Index]] cannot resolve when 20 notes are titled
+  // "Index", so linking all of them produced 20 dead links per write.
+  describe("ambiguous titles", () => {
+    it("skips a title shared by more than one note", async () => {
+      await writeNote(vaultPath, "ProjectA/Index", { frontmatter: {}, body: "" });
+      await writeNote(vaultPath, "ProjectB/Index", { frontmatter: {}, body: "" });
+
+      const result = await autoLinkScan(vaultPath, "New Note", "See the Index for details.");
+
+      expect(result.added).toEqual([]);
+      expect(result.content).not.toContain("[[Index]]");
+    });
+
+    it("still links a title that is unique across the vault", async () => {
+      await writeNote(vaultPath, "ProjectA/Index", { frontmatter: {}, body: "" });
+      await writeNote(vaultPath, "ProjectB/Index", { frontmatter: {}, body: "" });
+      await writeNote(vaultPath, "ProjectA/Retrieval Benchmark", { frontmatter: {}, body: "" });
+
+      const result = await autoLinkScan(vaultPath, "New Note", "The Index and the Retrieval Benchmark.");
+
+      expect(result.added).toEqual(["Retrieval Benchmark"]);
+    });
+
+    it("skips an alias claimed by more than one note", async () => {
+      await writeNote(vaultPath, "Alpha", { frontmatter: { aliases: ["shared alias"] }, body: "" });
+      await writeNote(vaultPath, "Beta", { frontmatter: { aliases: ["shared alias"] }, body: "" });
+
+      const result = await autoLinkScan(vaultPath, "New Note", "Mentions the shared alias here.");
+
+      expect(result.added).toEqual([]);
+    });
+
+    it("treats an alias colliding with another note's title as ambiguous", async () => {
+      await writeNote(vaultPath, "Retrieval", { frontmatter: {}, body: "" });
+      await writeNote(vaultPath, "Benchmark", { frontmatter: { aliases: ["Retrieval"] }, body: "" });
+
+      const result = await autoLinkScan(vaultPath, "New Note", "About Retrieval in general.");
+
+      expect(result.added).toEqual([]);
+    });
+
+    it("counts the note being written when deciding ambiguity, but never links to itself", async () => {
+      await writeNote(vaultPath, "ProjectA/Index", { frontmatter: {}, body: "" });
+      await writeNote(vaultPath, "ProjectB/Index", { frontmatter: {}, body: "" });
+
+      // Written from one of the colliding notes: the other Index is still
+      // ambiguous, and the note must not link to itself either.
+      const result = await autoLinkScan(vaultPath, "ProjectA/Index", "This Index describes the project.");
+
+      expect(result.added).toEqual([]);
+    });
+
+    it("ignores a term made ambiguous only by a note that is already linked", async () => {
+      await writeNote(vaultPath, "ProjectA/Index", { frontmatter: {}, body: "" });
+      await writeNote(vaultPath, "ProjectB/Index", { frontmatter: {}, body: "" });
+
+      const content = "Already points at [[ProjectA/Index]] but also says Index in prose.";
+      const result = await autoLinkScan(vaultPath, "New Note", content);
+
+      expect(result.added).toEqual([]);
+      expect(result.content).toBe(content);
+    });
+  });
 });

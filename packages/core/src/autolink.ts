@@ -11,6 +11,7 @@ export interface AutoLinkResult {
 }
 
 interface Candidate {
+  path: string;
   title: string;
   terms: string[];
 }
@@ -21,6 +22,10 @@ interface Candidate {
  * mentions in `content`, and appends any not already linked anywhere in
  * the file under a "## Related (auto-linked)" heading. Pure function —
  * caller is responsible for writing the returned content back to disk.
+ *
+ * Only terms that uniquely identify one note are linked; a title or alias
+ * shared by two or more notes is skipped, because the bare `[[title]]` this
+ * writes could not resolve to a specific one (VNL-012).
  */
 export async function autoLinkScan(
   vaultPath: string,
@@ -28,14 +33,17 @@ export async function autoLinkScan(
   content: string,
 ): Promise<AutoLinkResult> {
   const allPaths = await listNotes(vaultPath);
-  const otherPaths = allPaths.filter((path) => path !== notePath);
 
   // Read all candidate notes concurrently, and fail open per-note (a
   // locked/unreadable file elsewhere in the vault — e.g. a transient
   // OneDrive sync conflict — must not block writing the current note,
   // same as the PowerShell hook it replaces).
+  //
+  // The note being written is included here even though it can never be a
+  // candidate: its own title and aliases still have to be counted when
+  // deciding which terms are ambiguous below.
   const candidates: Candidate[] = await Promise.all(
-    otherPaths.map(async (path) => {
+    allPaths.map(async (path) => {
       const title = path.split("/").pop() ?? path;
       let aliases: string[] = [];
       try {
@@ -44,20 +52,41 @@ export async function autoLinkScan(
       } catch {
         // Unreadable note — still usable as a title-only candidate.
       }
-      return { title, terms: [title, ...aliases] };
+      return { path, title, terms: [title, ...aliases] };
     }),
   );
+
+  // A term is only linkable when it identifies exactly one note, mirroring
+  // the rule buildStructuralIndex() already applies to hand-written
+  // wikilinks (structuralLinks.ts): this vault has ~20 notes titled "Index"
+  // and several titled "CLAUDE" across project folders, so a bare
+  // [[Index]] resolves to whichever one Obsidian guesses. Linking every
+  // one of them — which is what this scan used to do — produced 20
+  // identical dead links on a single write (VNL-012).
+  const owners = new Map<string, Set<string>>();
+  for (const { path, terms } of candidates) {
+    for (const term of terms) {
+      if (typeof term !== "string" || term.length < MIN_TERM_LENGTH) continue;
+      const key = term.toLowerCase();
+      const set = owners.get(key) ?? new Set<string>();
+      set.add(path);
+      owners.set(key, set);
+    }
+  }
 
   const existingTargets = new Set(extractWikilinks(content).map((link) => link.target.toLowerCase()));
 
   const added: string[] = [];
-  for (const { title, terms } of candidates) {
-    if (!title) continue;
+  for (const { path, title, terms } of candidates) {
+    if (!title || path === notePath) continue;
     const alreadyLinked = terms.some((term) => existingTargets.has(term.toLowerCase()));
     if (alreadyLinked) continue;
 
     const isMentioned = terms.some((term) => {
-      if (term.length < MIN_TERM_LENGTH) return false;
+      if (typeof term !== "string" || term.length < MIN_TERM_LENGTH) return false;
+      // Ambiguous term: some other note answers to it too, so a bare
+      // [[term]] would be a guess. Dropped rather than guessed at.
+      if (owners.get(term.toLowerCase())?.size !== 1) return false;
       const pattern = new RegExp(`\\b${escapeRegExp(term)}\\b`, "i");
       return pattern.test(content);
     });
