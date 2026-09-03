@@ -109,6 +109,32 @@ describe("recall", () => {
     expect(result.hits[0].why.graphEnergy).toBeGreaterThan(0);
   });
 
+  it("ignores terms common to most of the vault, so a natural-language question doesn't match on function words", async () => {
+    // Observed live: "what did we decide about a merchant of record" pulled
+    // two unrelated notes into the top 5 on "what/did/we/about/a/of" alone.
+    await note("Merchant Of Record Decision", "what we decided about the merchant of record");
+    for (let i = 0; i < 8; i++) await note(`Filler ${i}`, "what did we decide about a thing of ours");
+    await rebuildContentIndex(vaultPath, dataDir);
+
+    const result = await recall(vaultPath, dataDir, "what did we decide about a merchant of record");
+
+    expect(result.hits[0].path).toBe("Merchant Of Record Decision");
+    expect(result.hits[0].why.matchedTerms).toEqual(expect.arrayContaining(["merchant", "record"]));
+    expect(result.hits[0].why.matchedTerms).not.toContain("what");
+    // The filler notes share only function words with the query, so none of
+    // them should be a hit at all.
+    expect(result.hits.map((hit) => hit.path)).toEqual(["Merchant Of Record Decision"]);
+  });
+
+  it("still answers a query made only of common words", async () => {
+    for (let i = 0; i < 5; i++) await note(`Common ${i}`, "what did we decide about this");
+    await rebuildContentIndex(vaultPath, dataDir);
+
+    const result = await recall(vaultPath, dataDir, "what did we decide");
+
+    expect(result.hits.length).toBeGreaterThan(0);
+  });
+
   it("uses context terms as a tie-breaker without letting them become the query", async () => {
     await note("Backup Notes A", "backup schedule for the database");
     await note("Backup Notes B", "backup schedule for the database, obsidian vault specifics");

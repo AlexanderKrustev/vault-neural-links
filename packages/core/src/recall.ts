@@ -62,6 +62,27 @@ const ALIAS_TF_BOOST = 2;
  * otherwise-equal matches, not to become the query.
  */
 const CONTEXT_TERM_WEIGHT = 0.3;
+/**
+ * A query term is dropped from scoring when its idf is below this fraction
+ * of the most selective term's idf in the same query — a corpus-derived
+ * stopword rule rather than a hardcoded English list, so it works for a
+ * vault in any language or jargon.
+ *
+ * Non-negative idf (see bm25) never reaches zero, so without this the
+ * function words in a natural-language question ("what did we decide about
+ * a…") each contribute a little and, summed, pull in notes that match
+ * nothing else — observed live on the real vault, where two unrelated notes
+ * made the top 5 on function words alone.
+ *
+ * Relative to the query rather than an absolute share of the vault: a fixed
+ * "appears in more than X% of notes" cutoff was tried first and did not work
+ * on the real vault, where "did"/"about"/"through" sit well under any share
+ * that doesn't also discard real topic terms. What actually distinguishes
+ * them is that the same query contains something far rarer. A query whose
+ * terms are all equally common keeps all of them, and still returns its best
+ * matches rather than nothing.
+ */
+const MIN_IDF_RATIO = 0.25;
 
 export interface RecallWhy {
   /** Query (and context) terms that actually occur in this note. */
@@ -173,6 +194,32 @@ function lexicalCandidates(index: ContentIndexFile, terms: WeightedTerm[], cap: 
   return [...candidates];
 }
 
+/**
+ * Lucene's non-negative idf variant: the textbook Robertson idf goes
+ * negative for a term in more than half the corpus, which would let a very
+ * common term *subtract* from the score of a note that contains it.
+ */
+function inverseDocumentFrequency(df: number, totalNotes: number): number {
+  const safeDf = Math.max(df, 1);
+  return Math.log(1 + (totalNotes - safeDf + 0.5) / (safeDf + 0.5));
+}
+
+/**
+ * Query terms with enough selectivity to be worth scoring — see
+ * MIN_IDF_RATIO. Falls back to every term when none stands out, so a query
+ * of uniformly common words still retrieves.
+ */
+function selectiveTerms(
+  terms: WeightedTerm[],
+  documentFrequency: (token: string) => number,
+  totalNotes: number,
+): WeightedTerm[] {
+  const idfs = terms.map((term) => inverseDocumentFrequency(documentFrequency(term.token), totalNotes));
+  const maxIdf = Math.max(...idfs);
+  const selective = terms.filter((_, i) => idfs[i] >= MIN_IDF_RATIO * maxIdf);
+  return selective.length > 0 ? selective : terms;
+}
+
 interface ScoredNote {
   note: NoteRef;
   score: number;
@@ -235,11 +282,7 @@ function bm25(
       if (frequency === 0) continue;
       matchedTerms.push(term.token);
 
-      const df = Math.max(documentFrequency(term.token), 1);
-      // Lucene's non-negative idf variant: the textbook Robertson idf goes
-      // negative for a term in more than half the corpus, which would let a
-      // very common term *subtract* from the score of a note that contains it.
-      const idf = Math.log(1 + (totalNotes - df + 0.5) / (df + 0.5));
+      const idf = inverseDocumentFrequency(documentFrequency(term.token), totalNotes);
       const norm = frequency * (BM25_K1 + 1);
       const denominator = frequency + BM25_K1 * (1 - BM25_B + BM25_B * (length / (averageLength || 1)));
       score += term.weight * idf * (norm / denominator);
@@ -337,10 +380,12 @@ export async function recall(
     documentFrequency = () => flat;
   }
 
+  const scoringTerms = selectiveTerms(terms, documentFrequency, totalNotes);
+
   const candidates = (await readNotesInBatches(vaultPath, candidatePaths)).filter(
     (note): note is NoteRef => note !== null,
   );
-  const scored = bm25(candidates, terms, documentFrequency, totalNotes)
+  const scored = bm25(candidates, scoringTerms, documentFrequency, totalNotes)
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
 
