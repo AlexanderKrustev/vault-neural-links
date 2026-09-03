@@ -47,7 +47,7 @@ describe("MCP client integration (VNL-007)", () => {
     await rm(vaultPath, { recursive: true, force: true });
   });
 
-  it("tools/list advertises exactly the eleven supported tools", async () => {
+  it("tools/list advertises exactly the twelve supported tools", async () => {
     const { tools } = await client.listTools();
 
     expect(tools.map((tool) => tool.name).sort()).toEqual([
@@ -60,6 +60,7 @@ describe("MCP client integration (VNL-007)", () => {
       "list_notes",
       "log_traversal",
       "read_note",
+      "recall",
       "search_notes",
       "update_note",
     ]);
@@ -84,6 +85,20 @@ describe("MCP client integration (VNL-007)", () => {
     expect(read.path).toBe("Notes/Round Trip");
     expect(read.frontmatter).toMatchObject({ type: "atomic" });
     expect(String(read.body)).toContain("hello");
+  });
+
+  it("answers a recall query over the protocol (VNL-050)", async () => {
+    await client.callTool({
+      name: "create_note",
+      arguments: { path: "Notes/Kill Process By Port", frontmatter: {}, body: "Use lsof, then kill the pid." },
+    });
+
+    const result = parseResult(await client.callTool({ name: "recall", arguments: { query: "kill process by port" } }));
+    const hits = result.hits as { path: string; snippet: string; why: { matchedTerms: string[] } }[];
+
+    expect(hits[0].path).toBe("Notes/Kill Process By Port");
+    expect(hits[0].snippet).toContain("lsof");
+    expect(hits[0].why.matchedTerms).toContain("kill");
   });
 
   it("rejects a traversal-escaping path on read_note (VNL-001)", async () => {

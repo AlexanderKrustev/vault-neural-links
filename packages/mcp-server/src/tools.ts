@@ -84,6 +84,54 @@ export const getWeightedNeighborsTool = {
 };
 
 
+export const recallTool = {
+  name: "recall",
+  config: {
+    title: "Recall (query-driven hybrid retrieval)",
+    description:
+      "The recommended entry point for 'what should I read about X?'. Takes the question itself, " +
+      "not a note you already know about: relevance scoring (BM25 over the content index) picks " +
+      "the notes that match, then spreading activation over the usage-weighted link graph expands " +
+      "and re-ranks them, so notes the vault's own link/usage structure says belong with the " +
+      "matches surface too — even ones no query term touches. Each hit comes back with a snippet " +
+      "and a `why` (matched terms, the seed note and hop count the graph reached it through, " +
+      "activation energy, days since the file changed, and `supersededBy` when the note is marked " +
+      "outdated), so results can be triaged without a read_note call each. Use search_notes " +
+      "instead only when you want a literal text match with no graph involvement, and " +
+      "get_weighted_neighbors / activate when your starting point genuinely is a specific note.",
+    inputSchema: {
+      query: z.string().describe("What you are looking for, in natural language or keywords"),
+      topK: z.number().int().positive().max(100).optional().describe("Max results to return (default 10)"),
+      context: z
+        .string()
+        .optional()
+        .describe(
+          "What you are working on right now (task description, current file, project name). Its terms " +
+            "are scored like query terms but at a much lower weight, to break ties between otherwise " +
+            "equally relevant notes rather than to become the query.",
+        ),
+    },
+  },
+  handler:
+    (ctx: ToolContext) =>
+    async ({ query, topK, context }: { query: string; topK?: number; context?: string }) => {
+      const result = await ctx.client.recall(query, {
+        topK,
+        context,
+        onEvent: (event) => ctx.activationSocket?.broadcast(event),
+      });
+      // Unlike search_notes, a recall hit reached through the graph has a real
+      // origin note — the lexical seed it was expanded from — so reading it
+      // next is the same deterministic "this retrieval result got acted on"
+      // signal AIBRAIN-71 credits for activate()/get_weighted_neighbors().
+      // Purely lexical hits have no such origin and are left out.
+      ctx.pendingRetrievals = new Map(
+        result.hits.flatMap((hit) => (hit.why.via ? [[hit.path, hit.why.via] as [string, string]] : [])),
+      );
+      return textResult(result);
+    },
+};
+
 export const activateTool = {
   name: "activate",
   config: {

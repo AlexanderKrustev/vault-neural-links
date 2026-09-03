@@ -10,6 +10,7 @@ import {
   listNotesTool,
   logTraversalTool,
   readNoteTool,
+  recallTool,
   searchNotesTool,
   updateNoteTool,
   type ToolContext,
@@ -33,6 +34,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
   const server = new McpServer({ name: "vault-neural-link", version });
 
   const tools = [
+    recallTool,
     getWeightedNeighborsTool,
     activateTool,
     ablationDiffTool,

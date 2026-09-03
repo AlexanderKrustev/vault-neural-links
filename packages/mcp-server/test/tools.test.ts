@@ -14,6 +14,7 @@ import {
   logTraversalTool,
   makeToolContext,
   readNoteTool,
+  recallTool,
   searchNotesTool,
   updateNoteTool,
   type ToolContext,
@@ -333,6 +334,49 @@ describe("mcp-server tools", () => {
 
     const notes = parseResult(await listNotesTool.handler(ctx)({}));
     expect(notes).toEqual(["A"]);
+  });
+
+  it("recall answers a query with snippets and a why per hit (VNL-050)", async () => {
+    await createNoteTool.handler(ctx)({
+      path: "Kill Process By Port",
+      frontmatter: {},
+      body: "Use lsof to find the process listening on a port, then kill it.",
+    });
+    await createNoteTool.handler(ctx)({ path: "Gardening", frontmatter: {}, body: "Tomatoes need water." });
+
+    const result = parseResult(await recallTool.handler(ctx)({ query: "kill process by port" }));
+
+    expect(result.hits[0].path).toBe("Kill Process By Port");
+    expect(result.hits[0].snippet).toContain("lsof");
+    expect(result.hits[0].why.matchedTerms).toContain("port");
+    expect(result.seeds).toContain("Kill Process By Port");
+  });
+
+  it("recall credits a graph-expanded hit to the seed it came from, so reading it auto-reinforces", async () => {
+    await createNoteTool.handler(ctx)({ path: "Kill Process By Port", frontmatter: {}, body: "lsof and kill." });
+    await createNoteTool.handler(ctx)({ path: "Shell Aliases", frontmatter: {}, body: "Nothing in common." });
+
+    await appendEvent(ctx.vaultDataDir, "seed", {
+      ts: new Date().toISOString(),
+      instance: "seed",
+      type: "traverse",
+      from: "Kill Process By Port",
+      to: "Shell Aliases",
+      weight_delta: 10,
+    });
+    await compactWeightsTool.handler(ctx)({});
+
+    const result = parseResult(await recallTool.handler(ctx)({ query: "kill process by port" }));
+    const expanded = result.hits.find((hit: { path: string }) => hit.path === "Shell Aliases");
+
+    expect(expanded.source).toBe("graph");
+    expect(expanded.why.via).toBe("Kill Process By Port");
+    // The lexical hit has no origin note to credit, so it must not be queued
+    // for auto-reinforcement — only the graph-expanded one is.
+    expect([...ctx.pendingRetrievals.entries()]).toEqual([["Shell Aliases", "Kill Process By Port"]]);
+
+    await readNoteTool.handler(ctx)({ path: "Shell Aliases" });
+    expect(ctx.pendingRetrievals.has("Shell Aliases")).toBe(false);
   });
 
   it("search_notes finds a note by title without weight data", async () => {

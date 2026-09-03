@@ -432,9 +432,12 @@ export interface ClusteringResult {
 export interface RetrievalLogEntry {
   ts: string;
   instance: string;
-  note: string;
+  /** The note the retrieval started from. Absent for source: "recall", which starts from a query — see `query` (VNL-050). */
+  note?: string;
+  /** The query text, for source: "recall" only. */
+  query?: string;
   /** Which tool produced this entry (AIBRAIN-126). Missing on entries logged before this field existed — treat as "activate". */
-  source?: "activate" | "get_weighted_neighbors";
+  source?: "activate" | "get_weighted_neighbors" | "recall";
   /** Set for source: "activate" only — get_weighted_neighbors is a direct lookup, not a tiered fallback pipeline. */
   tier?: "activation" | "keyword" | "recency";
   resultCount: number;
@@ -443,8 +446,10 @@ export interface RetrievalLogEntry {
   timedOut?: boolean;
   /** How many times activation's min/structuralMinThreshold were relaxed to try to reach minK results. Activate-only. */
   relaxations?: number;
-  /** Set for source: "get_weighted_neighbors" only — the topK it was called with. */
+  /** Set for source: "get_weighted_neighbors" and "recall" — the topK it was called with. */
   topK?: number;
+  /** Set for source: "recall" — how many notes were read and lexically scored for this query (VNL-050). */
+  candidatesScored?: number;
 }
 
 

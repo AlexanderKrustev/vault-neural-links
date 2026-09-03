@@ -6,6 +6,7 @@ import { getWeightedNeighbors, computeLiveNeighborWeights } from "./query.js";
 import { activate } from "./activation.js";
 import { runAblationComparison } from "./ablation.js";
 import { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
+import { recall, type RecallOptions, type RecallResult } from "./recall.js";
 import { resolveDataDir } from "./vaultPaths.js";
 import { SessionBuffer, persistSessionBuffer } from "./priming.js";
 import type {
@@ -51,6 +52,7 @@ export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from 
 export { activate } from "./activation.js";
 export { runAblationComparison } from "./ablation.js";
 export { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
+export { recall, type RecallHit, type RecallOptions, type RecallResult, type RecallWhy } from "./recall.js";
 export {
   resolveDataDir,
   resolveInsideVault,
@@ -127,6 +129,13 @@ export interface VaultLinkClient {
     onEvent?: ActivationEventSink,
     options?: RetrieveWithFallbackOptions,
   ): Promise<RetrievalResult>;
+  /**
+   * Query-driven hybrid retrieval (VNL-050): the entry point that takes the
+   * agent's actual question rather than a note it already knows about.
+   * Primes on what it returns (shallow exposure, like search_notes) and
+   * leaves both a search-log and a retrieval-log trace.
+   */
+  recall(query: string, options?: RecallOptions): Promise<RecallResult>;
   runAblationComparison(
     note: string,
     disabledLayers: Partial<AblationLayers>,
@@ -240,6 +249,34 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
         latencyMs: Date.now() - start,
         timedOut: result.timedOut,
         relaxations: result.relaxations,
+      });
+      return result;
+    },
+
+    async recall(query: string, options: RecallOptions = {}) {
+      const start = Date.now();
+      const result = await recall(vaultPath, vaultDataDir, query, { ...options, sessionBuffer });
+      // Same shallow-exposure priming tier search_notes uses: appearing in a
+      // result list is not the engagement read_note represents, so it must
+      // never persist as a weight.
+      if (result.hits.length > 0) await touch(...result.hits.map((hit) => hit.path));
+      await appendSearchLog(vaultDataDir, instanceId, {
+        ts: new Date().toISOString(),
+        instance: instanceId,
+        query,
+        resultCount: result.hits.length,
+        useWeights: true,
+      });
+      await appendRetrievalLog(vaultDataDir, instanceId, {
+        ts: new Date().toISOString(),
+        instance: instanceId,
+        query,
+        source: "recall",
+        resultCount: result.hits.length,
+        topK: options.topK,
+        candidatesScored: result.candidatesScored,
+        latencyMs: Date.now() - start,
+        timedOut: result.timedOut,
       });
       return result;
     },
