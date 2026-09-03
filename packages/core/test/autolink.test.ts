@@ -174,4 +174,79 @@ describe("autoLinkScan", () => {
       expect(result.content).toBe(content);
     });
   });
+
+  describe("links already present in another form", () => {
+    it("recognizes a path-form link as linking that note's bare title", async () => {
+      await writeNote(vaultPath, "MOCs/VaultNeuralLinks", { frontmatter: {}, body: "" });
+
+      const content = "See [[MOCs/VaultNeuralLinks]] — the VaultNeuralLinks domain index.";
+      const result = await autoLinkScan(vaultPath, "New Note", content);
+
+      expect(result.added).toEqual([]);
+      expect(result.content).toBe(content);
+    });
+
+    it("recognizes a title-form link when the candidate is a nested note", async () => {
+      await writeNote(vaultPath, "Notes/Deep/Retrieval Benchmark", { frontmatter: {}, body: "" });
+
+      const content = "See [[Retrieval Benchmark]] and the Retrieval Benchmark again.";
+      const result = await autoLinkScan(vaultPath, "New Note", content);
+
+      expect(result.added).toEqual([]);
+    });
+
+    it("still links a note that is merely mentioned near an unrelated link", async () => {
+      await writeNote(vaultPath, "Retrieval Benchmark", { frontmatter: {}, body: "" });
+      await writeNote(vaultPath, "Something Else", { frontmatter: {}, body: "" });
+
+      const result = await autoLinkScan(
+        vaultPath,
+        "New Note",
+        "See [[Something Else]] about the Retrieval Benchmark.",
+      );
+
+      expect(result.added).toEqual(["Retrieval Benchmark"]);
+    });
+  });
+
+  describe("common-word titles", () => {
+    it("does not link a single-word title mentioned in different casing", async () => {
+      await writeNote(vaultPath, "ARCHITECTURE", { frontmatter: {}, body: "" });
+      await writeNote(vaultPath, "Reports", { frontmatter: {}, body: "" });
+
+      const result = await autoLinkScan(
+        vaultPath,
+        "New Note",
+        "A standing architecture constraint, which path.isAbsolute reports as false.",
+      );
+
+      expect(result.added).toEqual([]);
+    });
+
+    it("links a single-word title when the casing matches the note", async () => {
+      await writeNote(vaultPath, "ARCHITECTURE", { frontmatter: {}, body: "" });
+
+      const result = await autoLinkScan(vaultPath, "New Note", "See ARCHITECTURE for the full picture.");
+
+      expect(result.added).toEqual(["ARCHITECTURE"]);
+    });
+
+    it("keeps multi-word titles case-insensitive", async () => {
+      await writeNote(vaultPath, "Retrieval Benchmark", { frontmatter: {}, body: "" });
+
+      const result = await autoLinkScan(vaultPath, "New Note", "Discussed in the retrieval benchmark work.");
+
+      expect(result.added).toEqual(["Retrieval Benchmark"]);
+    });
+
+    it("does not count a mention that only occurs inside another wikilink", async () => {
+      await writeNote(vaultPath, "Jira", { frontmatter: {}, body: "" });
+
+      const content = "See [[2026-09-02 Re-Plan - Jira Retired for docs PLAN]] for background.";
+      const result = await autoLinkScan(vaultPath, "New Note", content);
+
+      expect(result.added).toEqual([]);
+      expect(result.content).toBe(content);
+    });
+  });
 });

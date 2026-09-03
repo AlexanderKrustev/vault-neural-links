@@ -4,6 +4,8 @@ import { appendChangelogEntry } from "./changelog.js";
 
 const RELATED_HEADING = "## Related (auto-linked)";
 const MIN_TERM_LENGTH = 4;
+// Whole [[...]] spans, embeds included — see the `prose` blanking below.
+const WIKILINK_SPAN_RE = /!?\[\[[^\]]+\]\]/g;
 
 export interface AutoLinkResult {
   content: string;
@@ -23,9 +25,11 @@ interface Candidate {
  * the file under a "## Related (auto-linked)" heading. Pure function —
  * caller is responsible for writing the returned content back to disk.
  *
- * Only terms that uniquely identify one note are linked; a title or alias
- * shared by two or more notes is skipped, because the bare `[[title]]` this
- * writes could not resolve to a specific one (VNL-012).
+ * Three rules keep the output from turning into noise (VNL-012):
+ * a term must uniquely identify one note (a title or alias shared by two
+ * notes could not resolve from the bare `[[title]]` this writes); a
+ * single-word term must match the note's own casing; and text inside an
+ * existing wikilink is not treated as prose.
  */
 export async function autoLinkScan(
   vaultPath: string,
@@ -64,7 +68,9 @@ export async function autoLinkScan(
   // one of them — which is what this scan used to do — produced 20
   // identical dead links on a single write (VNL-012).
   const owners = new Map<string, Set<string>>();
+  const byPathLower = new Map<string, string>();
   for (const { path, terms } of candidates) {
+    byPathLower.set(path.toLowerCase(), path);
     for (const term of terms) {
       if (typeof term !== "string" || term.length < MIN_TERM_LENGTH) continue;
       const key = term.toLowerCase();
@@ -74,21 +80,44 @@ export async function autoLinkScan(
     }
   }
 
-  const existingTargets = new Set(extractWikilinks(content).map((link) => link.target.toLowerCase()));
+  function soleOwnerOf(term: string): string | undefined {
+    const set = owners.get(term.toLowerCase());
+    return set?.size === 1 ? [...set][0] : undefined;
+  }
+
+  // Which notes the content already links to, resolved the same way a
+  // wikilink resolves: an existing [[MOCs/VaultNeuralLinks]] means the note
+  // titled "VaultNeuralLinks" is already linked, even though the link text
+  // is the path and the candidate's term is the bare title.
+  const linkedPaths = new Set<string>();
+  for (const { target } of extractWikilinks(content)) {
+    const resolved = byPathLower.get(target.toLowerCase()) ?? soleOwnerOf(target.split("/").pop() ?? target);
+    if (resolved) linkedPaths.add(resolved);
+  }
+
+  // Text inside a wikilink belongs to that link's target, not to this
+  // note's prose: a mention of "Jira" inside [[... - Jira Retired ...]] is
+  // not the author writing about Jira. Blanked to a space so word
+  // boundaries either side still hold.
+  const prose = content.replace(WIKILINK_SPAN_RE, " ");
 
   const added: string[] = [];
   for (const { path, title, terms } of candidates) {
     if (!title || path === notePath) continue;
-    const alreadyLinked = terms.some((term) => existingTargets.has(term.toLowerCase()));
-    if (alreadyLinked) continue;
+    if (linkedPaths.has(path)) continue;
 
     const isMentioned = terms.some((term) => {
       if (typeof term !== "string" || term.length < MIN_TERM_LENGTH) return false;
       // Ambiguous term: some other note answers to it too, so a bare
       // [[term]] would be a guess. Dropped rather than guessed at.
-      if (owners.get(term.toLowerCase())?.size !== 1) return false;
-      const pattern = new RegExp(`\\b${escapeRegExp(term)}\\b`, "i");
-      return pattern.test(content);
+      if (soleOwnerOf(term) !== path) return false;
+      // A single-word title is usually a common noun ("Index", "Reports",
+      // "Architecture"), and matching it case-insensitively links every
+      // note that happens to use the word in prose. Requiring the note's
+      // own casing keeps the deliberate mentions and drops the incidental
+      // ones. Multi-word terms are specific enough to stay loose.
+      const flags = /\s/.test(term) ? "i" : "";
+      return new RegExp(`\\b${escapeRegExp(term)}\\b`, flags).test(prose);
     });
 
     if (isMentioned) added.push(title);

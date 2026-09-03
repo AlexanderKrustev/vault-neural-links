@@ -82,7 +82,7 @@ Gate to exit: all items `done`, tests green, one MCP-client integration test exe
 | VNL-007 | **MCP-client integration test** via the SDK in-memory transport: `tools/list` (11 tools), `read_note` round trip, `read_note ../x` rejected. | 2 h | todo |
 | VNL-008 | **Honest README/INSTALL**: scale claim limited to what was measured; add "exclude `.vault-neural-links/` from OneDrive/iCloud sync" (conflict copies were observed in the real vault); remove `reinforce_link` remnants from `compact_weights` description and `docs/claude-code-integration.md`; mark `docs/spec.md` superseded. | 1 h | todo |
 | VNL-009 | Delete own `session/*.json` and `activation-sockets/*.json` on SIGINT/SIGTERM/stdin close; nightly prune of orphaned session/retrieval/search files (84 stale session files observed). | 2 h | todo |
-| VNL-012 | Autolink: route the per-write scan through `readNodesInBatches` (bounded concurrency) and skip ambiguous titles (those `structuralLinks.ts` refuses to resolve) — the unbounded `Promise.all` is the same EMFILE pattern already fixed in search. Ambiguous-title half done 2026-09-03; batching still open. | 2 h | doing |
+| VNL-012 | Autolink: route the per-write scan through `readNodesInBatches` (bounded concurrency) and skip ambiguous titles (those `structuralLinks.ts` refuses to resolve) — the unbounded `Promise.all` is the same EMFILE pattern already fixed in search. Ambiguous-title half done 2026-09-03, plus path-form dedup, case-sensitive single-word matching and wikilink-span exclusion; batching still open. | 2 h | doing |
 
 ### Phase 1 — Publish and validate · weeks 1–2
 
@@ -394,6 +394,8 @@ Full descriptions and acceptance criteria are in [`BACKLOG-ARCHIVE.md`](BACKLOG-
 ---
 
 ## 9. Changelog
+
+- **2026-09-03 (later still)** — VNL-012 auto-link noise, second pass: a path-form link (`[[MOCs/X]]`) now counts as already linking the note titled `X`; a single-word term must match the note's own casing, so a note titled `Reports` no longer links itself into every note using the word in prose; and text inside an existing wikilink is no longer read as this note's prose. 7 more tests (22 in `autolink.test.ts`), 260 green.
 
 - **2026-09-03 (later)** — VNL-012 ambiguous-title half done: `autoLinkScan` now links a title or alias only when it uniquely identifies one note, mirroring `buildStructuralIndex`'s existing rule. Found in practice — writing one vault note appended 27 auto-links, 20 of them identical dead `[[Index]]` links. 6 new tests. The bounded-concurrency half of VNL-012 is still open, so the row stays `doing`.
 
