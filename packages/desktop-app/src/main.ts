@@ -26,6 +26,7 @@ import {
   accountSessionPath,
   writeAccountSession,
   clearAccountSession,
+  isVaultRelativePath,
   type NoteRef,
   type SourceAdapter,
   type StructuralLinksFile,
@@ -329,6 +330,9 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("notes:read", async (_event, folderPath: string, notePath: string): Promise<NoteRef | null> => {
+    // A renderer-supplied path is untrusted input like any other (VNL-001);
+    // core rejects escapes, and a rejected path reads as "no such note" here.
+    if (!isVaultRelativePath(notePath)) return null;
     return readNote(folderPath, notePath);
   });
 
@@ -341,6 +345,7 @@ app.whenReady().then(async () => {
       frontmatter: Record<string, unknown>,
       body: string,
     ): Promise<{ ok: true; path: string; autoLinked: string[] } | { ok: false; error: string }> => {
+      if (!isVaultRelativePath(notePath)) return { ok: false, error: `"${notePath}" is not a valid vault-relative note path.` };
       const existing = await readNote(folderPath, notePath);
       if (existing) return { ok: false, error: `A note already exists at "${notePath}".` };
       const result = await writeNoteWithAutoLink(folderPath, notePath, frontmatter, body, "create");
@@ -359,6 +364,7 @@ app.whenReady().then(async () => {
       // The editor only ever hands back the body — frontmatter isn't
       // user-edited text in this first slice, so it's re-read from disk
       // rather than round-tripped through the renderer.
+      if (!isVaultRelativePath(notePath)) return { ok: false, error: `"${notePath}" is not a valid vault-relative note path.` };
       const existing = await readNote(folderPath, notePath);
       if (!existing) return { ok: false, error: `No note found at "${notePath}".` };
       const result = await writeNoteWithAutoLink(folderPath, notePath, existing.frontmatter, body, "update");

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { extractWikilinks } from "./parser.js";
 import { parseFrontmatter } from "./frontmatter.js";
+import { resolveNoteFile } from "./vaultPaths.js";
 
 /**
  * Resolves a note's `superseded_by` frontmatter value to a target note path.
@@ -29,7 +29,7 @@ export function resolveSupersededBy(frontmatter: Record<string, unknown>): strin
  */
 export async function readSupersession(vaultPath: string, notePath: string): Promise<string | undefined> {
   try {
-    const raw = await readFile(join(vaultPath, `${notePath}.md`), "utf8");
+    const raw = await readFile(resolveNoteFile(vaultPath, notePath), "utf8");
     const { frontmatter } = parseFrontmatter(raw);
     return resolveSupersededBy(frontmatter);
   } catch {

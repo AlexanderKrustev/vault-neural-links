@@ -73,7 +73,7 @@ Gate to exit: all items `done`, tests green, one MCP-client integration test exe
 
 | ID | Item | Effort | Status |
 |---|---|---|---|
-| VNL-001 | **Vault containment for every path argument.** `resolveInsideVault()` in core (`path.resolve`, reject absolute, reject escape, reject `.vault-neural-links/` and `.obsidian/` targets), used by `toFilePath`, `listNotes`, `readNoteType`, `readSupersession`, autolink, desktop IPC; zod `.refine` in `tools.ts`; 6+ tests. | 4 h | todo |
+| VNL-001 | **Vault containment for every path argument.** `resolveInsideVault()` in core (`path.resolve`, reject absolute, reject escape, reject `.vault-neural-links/` and `.obsidian/` targets), used by `toFilePath`, `listNotes`, `readNoteType`, `readSupersession`, autolink, desktop IPC; zod `.refine` in `tools.ts`; 6+ tests. | 4 h | done |
 | VNL-002 | **Activation socket binds loopback only** (`host: "127.0.0.1"`); socket bind failure must not kill the MCP server (socket is optional). | 1 h | todo |
 | VNL-003 | **Preserve frontmatter verbatim on body-only `update_note`.** Keep the raw frontmatter block and re-emit it unchanged unless frontmatter was explicitly supplied. Add block-list / nested-map fixtures. Longer term: adopt a real YAML parser (`yaml`). | 4 h | todo |
 | VNL-004 | **Compactor durability.** Rename each `events/*.jsonl` to `*.compacting` before reading so a live session's new appends land in a fresh file; per-line `try/catch` with quarantine of malformed lines; lock file so two compactors cannot double-fold; tests for all three. | 1 day | todo |
@@ -394,6 +394,8 @@ Full descriptions and acceptance criteria are in [`BACKLOG-ARCHIVE.md`](BACKLOG-
 ---
 
 ## 9. Changelog
+
+- **2026-09-03** — VNL-001 done: `resolveInsideVault`/`resolveNoteFile`/`assertVaultRelativePath` added in `packages/core/src/vaultPaths.ts` and wired into `toFilePath`, `listNotes`, `readNoteType`, `readSupersession` and the desktop IPC note handlers; every path argument in `tools.ts` now carries a zod `.refine`. 20 new tests (15 core, 5 mcp-server); 247 tests green, all five packages typecheck. Autolink is covered transitively (it only takes paths from `listNotes` and writes through `writeNote`).
 
 - **2026-09-02 (later still)** — Founder confirmed D10 and the Phase 2b priority order; Phase 2b is the primary track after Phase 0.
 - **2026-09-02 (later)** — Founder confirmed D1–D9. D10 added (engine usefulness thesis) with Phase 2b items VNL-050..057 as the priority track; see §3 Phase 2b and analysis report addendum.

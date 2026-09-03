@@ -44,7 +44,14 @@ export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from 
 export { activate } from "./activation.js";
 export { runAblationComparison } from "./ablation.js";
 export { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";
-export { resolveDataDir } from "./vaultPaths.js";
+export {
+  resolveDataDir,
+  resolveInsideVault,
+  resolveNoteFile,
+  assertVaultRelativePath,
+  isVaultRelativePath,
+  VaultPathError,
+} from "./vaultPaths.js";
 export {
   accountSessionPath,
   readAccountSession,

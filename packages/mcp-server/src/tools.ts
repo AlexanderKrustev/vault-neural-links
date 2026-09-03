@@ -5,6 +5,7 @@ import {
   DEFAULT_SPREADING_ACTIVATION_CONFIG,
   getEdgeWeight,
   initInstance,
+  isVaultRelativePath,
   listNotes,
   readNote,
   resolveDataDir,
@@ -40,6 +41,23 @@ export interface ToolContext {
   pendingRetrievals: Map<string, string>;
 }
 
+const VAULT_PATH_RULE =
+  "Must stay inside the vault: no absolute paths, no '..' segments, and nothing under " +
+  ".vault-neural-links/ or .obsidian/.";
+
+/**
+ * Schema for any caller-supplied path argument. Core enforces containment
+ * again at the filesystem boundary (`resolveInsideVault`); rejecting here as
+ * well means a prompt-injected traversal comes back as a schema error the
+ * model can see, instead of a raw fs error (VNL-001).
+ */
+function vaultRelativePath(description: string) {
+  return z
+    .string()
+    .refine(isVaultRelativePath, { message: VAULT_PATH_RULE })
+    .describe(`${description}. ${VAULT_PATH_RULE}`);
+}
+
 function textResult(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
@@ -54,7 +72,7 @@ export const getWeightedNeighborsTool = {
       "raw wikilink presence. Note path is vault-relative without the .md extension, " +
       "matching wikilink targets (e.g. 'MOCs/General').",
     inputSchema: {
-      note: z.string().describe("Vault-relative note path, without .md extension"),
+      note: vaultRelativePath("Vault-relative note path, without .md extension"),
       topK: z.number().int().positive().max(100).optional().describe("Max neighbors to return (default 10)"),
     },
   },
@@ -85,7 +103,7 @@ export const activateTool = {
       "response's `tier` field reports which of these actually served the result, `relaxations` " +
       "how many times thresholds were relaxed, and `timedOut` whether the budget ran out.",
     inputSchema: {
-      note: z.string().describe("Vault-relative note path, without .md extension"),
+      note: vaultRelativePath("Vault-relative note path, without .md extension"),
       energy: z.number().positive().optional().describe("Starting energy at the origin note (default 10)"),
       maxHops: z.number().int().positive().max(3).optional().describe("Max hops from the origin note (default 3)"),
       minThreshold: z.number().positive().optional().describe("Energy cutoff below which propagation/inclusion stops for usage-weighted edges (default 0.5)"),
@@ -177,7 +195,7 @@ export const ablationDiffTool = {
       "layer's contribution was taken out of other neighbors' energy shares; `reranked` entries " +
       "activated in both runs but with a materially different energy.",
     inputSchema: {
-      note: z.string().describe("Vault-relative note path, without .md extension"),
+      note: vaultRelativePath("Vault-relative note path, without .md extension"),
       disabledLayers: z
         .object({
           priming: z.boolean().optional(),
@@ -244,8 +262,8 @@ export const getEdgeWeightTool = {
     title: "Get edge weight",
     description: "Returns the current weight of the link between two specific notes, if one exists.",
     inputSchema: {
-      noteA: z.string().describe("Vault-relative note path, without .md extension"),
-      noteB: z.string().describe("Vault-relative note path, without .md extension"),
+      noteA: vaultRelativePath("Vault-relative note path, without .md extension"),
+      noteB: vaultRelativePath("Vault-relative note path, without .md extension"),
     },
   },
   handler: (ctx: ToolContext) => async ({ noteA, noteB }: { noteA: string; noteB: string }) => {
@@ -266,8 +284,8 @@ export const logTraversalTool = {
       "cover: crediting an edge whose target note's content was already known and so was never re-read. " +
       "This is a deliberate manual override, not a routine step to remember after every hop.",
     inputSchema: {
-      from: z.string().describe("Vault-relative path of the previously read note"),
-      to: z.string().describe("Vault-relative path of the note just read"),
+      from: vaultRelativePath("Vault-relative path of the previously read note"),
+      to: vaultRelativePath("Vault-relative path of the note just read"),
     },
   },
   handler: (ctx: ToolContext) => async ({ from, to }: { from: string; to: string }) => {
@@ -316,7 +334,7 @@ export const createNoteTool = {
       "script needed, this works from any MCP client. Fails if a note already exists at this path " +
       "(use update_note instead).",
     inputSchema: {
-      path: z.string().describe("Vault-relative note path, without .md extension"),
+      path: vaultRelativePath("Vault-relative note path, without .md extension"),
       frontmatter: z.record(z.string(), z.unknown()).describe("Frontmatter fields (type, created, domain, tags, aliases, etc.)"),
       body: z.string().describe("Note body (markdown, after the frontmatter block)"),
     },
@@ -342,7 +360,7 @@ export const updateNoteTool = {
       "heading (creating the heading if absent), matching this vault's '## Updates' / '## Related' " +
       "append-only convention. Then runs the same auto-link/changelog pipeline as create_note.",
     inputSchema: {
-      path: z.string().describe("Vault-relative note path, without .md extension"),
+      path: vaultRelativePath("Vault-relative note path, without .md extension"),
       body: z.string().optional().describe("Replacement body. Omit if using appendUnderHeading."),
       appendUnderHeading: z
         .object({
@@ -382,7 +400,7 @@ export const readNoteTool = {
     title: "Read note",
     description: "Reads a note's frontmatter and body.",
     inputSchema: {
-      path: z.string().describe("Vault-relative note path, without .md extension"),
+      path: vaultRelativePath("Vault-relative note path, without .md extension"),
     },
   },
   handler: (ctx: ToolContext) => async ({ path }: { path: string }) => {
@@ -419,7 +437,7 @@ export const listNotesTool = {
     title: "List notes",
     description: "Lists vault-relative note paths, optionally scoped to a folder. Skips Templates/.",
     inputSchema: {
-      folder: z.string().optional().describe("Vault-relative folder to scope the listing to"),
+      folder: vaultRelativePath("Vault-relative folder to scope the listing to").optional(),
     },
   },
   handler: (ctx: ToolContext) => async ({ folder }: { folder?: string }) => {

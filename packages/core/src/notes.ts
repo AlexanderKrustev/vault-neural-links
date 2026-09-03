@@ -5,6 +5,7 @@ import { getWeightedNeighbors } from "./query.js";
 import { readSupersession } from "./relations.js";
 import { candidatesFromIndex, loadContentIndex } from "./contentIndex.js";
 import { tokenize } from "./tokenize.js";
+import { resolveInsideVault, resolveNoteFile } from "./vaultPaths.js";
 
 // See searchNotes' weight-scoring step: caps how many textual hits get a
 // disk-backed weight lookup, and how many of those run concurrently, so a
@@ -29,8 +30,9 @@ export interface NoteRef {
 }
 
 export function toFilePath(vaultPath: string, notePath: string): string {
-  const withExt = notePath.endsWith(".md") ? notePath : `${notePath}.md`;
-  return join(vaultPath, withExt);
+  // Containment is enforced here rather than at each caller: every note read
+  // and write in core funnels through this function (VNL-001).
+  return resolveNoteFile(vaultPath, notePath);
 }
 
 function toNotePath(vaultPath: string, filePath: string): string {
@@ -121,7 +123,7 @@ export interface ListNotesOptions {
 }
 
 export async function listNotes(vaultPath: string, opts: ListNotesOptions = {}): Promise<string[]> {
-  const root = opts.folder ? join(vaultPath, opts.folder) : vaultPath;
+  const root = opts.folder ? resolveInsideVault(vaultPath, opts.folder) : vaultPath;
   const results: string[] = [];
 
   async function walk(dir: string) {

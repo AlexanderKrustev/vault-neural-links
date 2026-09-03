@@ -16,6 +16,7 @@ import { loadNoteImportance } from "./importance.js";
 import { primingBonus, type SessionBuffer } from "./priming.js";
 import { readSupersession } from "./relations.js";
 import { loadStructuralIndex } from "./structuralLinks.js";
+import { resolveNoteFile } from "./vaultPaths.js";
 
 // AIBRAIN-66 fast-follow: see DecayConfig's doc comment in types.ts for the
 // full rationale. Tuned empirically against benchmark-reinforcement.mjs
@@ -42,7 +43,7 @@ async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null
 
 async function readNoteType(vaultPath: string, notePath: string): Promise<string | undefined> {
   try {
-    const raw = await readFile(join(vaultPath, `${notePath}.md`), "utf8");
+    const raw = await readFile(resolveNoteFile(vaultPath, notePath), "utf8");
     const { frontmatter } = parseFrontmatter(raw);
     return typeof frontmatter.type === "string" ? frontmatter.type : undefined;
   } catch {

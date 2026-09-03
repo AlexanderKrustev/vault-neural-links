@@ -366,4 +366,43 @@ describe("mcp-server tools", () => {
     const readBack = parseResult(await readNoteTool.handler(ctx)({ path: "Templates/Meeting" }));
     expect(readBack.body.trim()).toBe("Agenda");
   });
+
+  // VNL-001: the tool schemas are the first place a prompt-injected traversal
+  // is stopped, so the rejection has to hold at the schema, not only in core.
+  describe("path argument containment", () => {
+    const escapes = ["../outside/Secret", "..\\outside\\Secret", "/etc/passwd", "C:/Windows/secret"];
+
+    it("read_note's schema rejects paths escaping the vault", () => {
+      for (const path of escapes) {
+        expect(readNoteTool.config.inputSchema.path.safeParse(path).success).toBe(false);
+      }
+      expect(readNoteTool.config.inputSchema.path.safeParse("MOCs/General").success).toBe(true);
+    });
+
+    it("write and traversal tools reject escaping paths too", () => {
+      expect(createNoteTool.config.inputSchema.path.safeParse("../outside/Evil").success).toBe(false);
+      expect(updateNoteTool.config.inputSchema.path.safeParse("../outside/Evil").success).toBe(false);
+      expect(logTraversalTool.config.inputSchema.from.safeParse("../outside/A").success).toBe(false);
+      expect(logTraversalTool.config.inputSchema.to.safeParse("../outside/B").success).toBe(false);
+      expect(activateTool.config.inputSchema.note.safeParse("../outside/A").success).toBe(false);
+      expect(getEdgeWeightTool.config.inputSchema.noteA.safeParse("../outside/A").success).toBe(false);
+    });
+
+    it("list_notes rejects a folder outside the vault but stays optional", () => {
+      expect(listNotesTool.config.inputSchema.folder.safeParse("../outside").success).toBe(false);
+      expect(listNotesTool.config.inputSchema.folder.safeParse(undefined).success).toBe(true);
+      expect(listNotesTool.config.inputSchema.folder.safeParse("Notes").success).toBe(true);
+    });
+
+    it("no tool accepts a path targeting the data dir or .obsidian/", () => {
+      expect(readNoteTool.config.inputSchema.path.safeParse(".vault-neural-links/link-weights").success).toBe(false);
+      expect(createNoteTool.config.inputSchema.path.safeParse(".obsidian/workspace").success).toBe(false);
+    });
+
+    it("core still rejects an escaping path if a handler is called directly", async () => {
+      await expect(readNoteTool.handler(ctx)({ path: "../outside/Secret" })).rejects.toThrow(
+        /Invalid vault-relative path/,
+      );
+    });
+  });
 });
