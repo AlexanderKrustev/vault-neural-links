@@ -379,6 +379,58 @@ describe("mcp-server tools", () => {
     expect(ctx.pendingRetrievals.has("Shell Aliases")).toBe(false);
   });
 
+  it("update_note marks a note superseded without disturbing the rest of its frontmatter (VNL-060)", async () => {
+    const raw = [
+      "---",
+      "type: atomic",
+      "created: 2026-08-30",
+      "status: active",
+      "# a comment the minimal writer cannot reproduce",
+      "aliases:",
+      "  - the old name",
+      "---",
+      "",
+      "Body text.",
+      "",
+    ].join("\n");
+    await writeFile(join(vaultPath, "Old Decision.md"), raw, "utf8");
+
+    const result = parseResult(
+      await updateNoteTool.handler(ctx)({
+        path: "Old Decision",
+        frontmatter: { status: "superseded", superseded_by: "[[New Decision]]" },
+      }),
+    );
+    expect(result.frontmatterChanged).toEqual(["status", "superseded_by"]);
+
+    const written = await readFile(join(vaultPath, "Old Decision.md"), "utf8");
+    expect(written).toContain("status: superseded");
+    expect(written).toContain('superseded_by: "[[New Decision]]"');
+    // Everything the patch did not name survives verbatim, VNL-003's guarantee.
+    expect(written).toContain("# a comment the minimal writer cannot reproduce");
+    expect(written).toContain("aliases:\n  - the old name");
+    expect(written).toContain("created: 2026-08-30");
+
+    // And it round-trips as the supersession signal recall reads.
+    const note = parseResult(await readNoteTool.handler(ctx)({ path: "Old Decision" }));
+    expect(note.frontmatter.status).toBe("superseded");
+    expect(note.frontmatter.superseded_by).toBe("[[New Decision]]");
+  });
+
+  it("update_note without a frontmatter patch still re-emits the block byte for byte", async () => {
+    const raw = ["---", "type: atomic", "weird: {a: 1}", "---", "", "Body.", ""].join("\n");
+    await writeFile(join(vaultPath, "Untouched.md"), raw, "utf8");
+
+    await updateNoteTool.handler(ctx)({
+      path: "Untouched",
+      appendUnderHeading: { heading: "## Updates", text: "- something happened" },
+    });
+
+    const written = await readFile(join(vaultPath, "Untouched.md"), "utf8");
+    expect(written.startsWith(["---", "type: atomic", "weird: {a: 1}", "---"].join("\n"))).toBe(true);
+    expect(written).toContain("- something happened");
+  });
+
   it("create_note reinforces a wikilink to a note read this session (VNL-054)", async () => {
     await createNoteTool.handler(ctx)({ path: "Kill Process By Port", frontmatter: {}, body: "lsof and kill." });
     await readNoteTool.handler(ctx)({ path: "Kill Process By Port" });

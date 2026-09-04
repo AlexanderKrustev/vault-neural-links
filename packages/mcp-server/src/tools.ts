@@ -10,6 +10,7 @@ import {
   isVaultRelativePath,
   learnableQueryTerms,
   listNotes,
+  mergeFrontmatterRaw,
   readNote,
   resolveDataDir,
   searchNotes,
@@ -489,9 +490,13 @@ export const updateNoteTool = {
     description:
       "Updates an existing note — either replacing its body outright, or appending text under a " +
       "heading (creating the heading if absent), matching this vault's '## Updates' / '## Related' " +
-      "append-only convention. Then runs the same auto-link/changelog pipeline as create_note, " +
-      "including create_note's `cited` write-back: a [[wikilink]] in the text you supply here to a " +
-      "note you read this session strengthens that link.",
+      "append-only convention. Frontmatter can be changed a key at a time via `frontmatter` — " +
+      "supply only the keys you mean to set (null removes one); every other key, and the block's " +
+      "comments, ordering and formatting, is left exactly as it was. That is how a note gets marked " +
+      "outdated: `{ status: 'superseded', superseded_by: '[[New Note]]' }`, which is the signal " +
+      "recall surfaces as `supersededBy`. Then runs the same auto-link/changelog pipeline as " +
+      "create_note, including create_note's `cited` write-back: a [[wikilink]] in the text you " +
+      "supply here to a note you read this session strengthens that link.",
     inputSchema: {
       path: vaultRelativePath("Vault-relative note path, without .md extension"),
       body: z.string().optional().describe("Replacement body. Omit if using appendUnderHeading."),
@@ -503,6 +508,13 @@ export const updateNoteTool = {
         })
         .optional()
         .describe("Append text under a heading instead of replacing the whole body"),
+      frontmatter: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "Frontmatter keys to set, merged into the existing block — only the keys named here are " +
+            "touched, and a null value removes one. Omit entirely to leave frontmatter alone.",
+        ),
     },
   },
   handler:
@@ -511,10 +523,12 @@ export const updateNoteTool = {
       path,
       body,
       appendUnderHeading: appendOpts,
+      frontmatter,
     }: {
       path: string;
       body?: string;
       appendUnderHeading?: { heading: string; text: string; prepend?: boolean };
+      frontmatter?: Record<string, unknown>;
     }) => {
       const existing = await readNote(ctx.vaultPath, path);
       if (!existing) {
@@ -522,21 +536,35 @@ export const updateNoteTool = {
       }
 
       const newBody = appendOpts ? appendUnderHeading(existing.body, appendOpts) : body ?? existing.body;
-      // VNL-003: update_note never edits frontmatter, so the block goes back
-      // to disk verbatim rather than through the minimal YAML writer.
+      // VNL-003 + VNL-060: the block still goes back to disk as raw text
+      // rather than through the minimal YAML writer — a patch edits only the
+      // lines of the keys it names, so everything else stays verbatim. With
+      // no patch this is byte-for-byte the old behaviour.
+      const patchedKeys = frontmatter ? Object.keys(frontmatter) : [];
+      let rawFrontmatter = existing.rawFrontmatter;
+      if (patchedKeys.length > 0) {
+        try {
+          rawFrontmatter = mergeFrontmatterRaw(existing.rawFrontmatter, frontmatter!);
+        } catch (err) {
+          // A value the writer cannot express (see mergeFrontmatterRaw) comes
+          // back as something the model can read and correct, rather than as
+          // a protocol-level failure or a mangled note.
+          return textResult({ error: (err as Error).message });
+        }
+      }
       const result = await writeNoteWithAutoLink(
         ctx.vaultPath,
         path,
         existing.frontmatter,
         newBody,
         "update",
-        existing.rawFrontmatter,
+        rawFrontmatter,
       );
       // Only what this call actually contributed: an appendUnderHeading adds
       // its `text`, a body replacement is the whole new body (whatever of the
       // old note the agent chose to carry over included).
       const cited = await creditCitations(ctx, path, appendOpts ? appendOpts.text : newBody);
-      return textResult({ updated: true, ...result, cited });
+      return textResult({ updated: true, ...result, cited, frontmatterChanged: patchedKeys });
     },
 };
 
