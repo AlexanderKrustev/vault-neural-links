@@ -69,6 +69,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
   let traverseCount = 0;
   let reinforceExplicitCount = 0;
   let reinforceAutoCount = 0;
+  let reinforceCitedCount = 0;
   let humanOpenCount = 0;
   let humanEditCount = 0;
   let termSearchReadCount = 0;
@@ -115,6 +116,8 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
       else if (event.type === "reinforce") {
         // Missing trigger means this event predates AIBRAIN-71's field — it can only have come from an explicit reinforce_link call.
         if (event.trigger === "auto-retrieval") reinforceAutoCount++;
+        // VNL-054: the agent wrote [[X]] into a note after reading X.
+        else if (event.trigger === "cited") reinforceCitedCount++;
         else reinforceExplicitCount++;
       }
       // "decay" is a reserved EventType never actually appended by any live code path.
@@ -159,12 +162,12 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
         "AIBRAIN-70's search logging fix (2026-08-16), before which search_notes left no persisted trace at all.",
     );
   }
-  if (reinforceExplicitCount === 0 && reinforceAutoCount === 0 && traverseCount > 0) {
+  if (reinforceExplicitCount === 0 && reinforceAutoCount === 0 && reinforceCitedCount === 0 && traverseCount > 0) {
     gaps.push(
       "No reinforcement signal recorded (explicit or automatic) — traversal auto-logging (read_note) is " +
         "carrying all persisted usage weight in practice.",
     );
-  } else if (reinforceExplicitCount === 0 && reinforceAutoCount > 0) {
+  } else if (reinforceExplicitCount === 0 && reinforceAutoCount + reinforceCitedCount > 0) {
     // AIBRAIN-66/AIBRAIN-69 follow-up (2026-08-21): this is expected now,
     // not a gap to flag as actionable — the explicit reinforce_link MCP
     // tool was removed (zero real invocations ever, per the 2026-08-16
@@ -174,8 +177,9 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
     // going forward. `explicit` counts above 0 only ever come from
     // historical data logged before the tool's removal.
     gaps.push(
-      `All reinforcement signal so far is automatic (${reinforceAutoCount} edge(s), via retrieval-then-read ` +
-        "correlation, AIBRAIN-71) — expected, since the explicit reinforce_link tool was removed.",
+      `All reinforcement signal so far is automatic (${reinforceAutoCount} edge(s) via retrieval-then-read ` +
+        `correlation, AIBRAIN-71; ${reinforceCitedCount} via write-back citation, VNL-054) — expected, since the ` +
+        "explicit reinforce_link tool was removed.",
     );
   }
   if (activateTierCounts.keyword === 0 && activateTierCounts.recency === 0 && activateTierCounts.activation > 0) {
@@ -189,7 +193,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
     typicalSessionMinutes: median(sessions.map((s) => s.durationMinutes).filter((d): d is number => d !== null && d > 0)),
     mechanismCounts: {
       traverse: traverseCount,
-      reinforce: { explicit: reinforceExplicitCount, autoRetrieval: reinforceAutoCount },
+      reinforce: { explicit: reinforceExplicitCount, autoRetrieval: reinforceAutoCount, cited: reinforceCitedCount },
       human: { opens: humanOpenCount, edits: humanEditCount },
       termLearn: { searchRead: termSearchReadCount, recallRead: termRecallReadCount },
       activate: activateTierCounts,

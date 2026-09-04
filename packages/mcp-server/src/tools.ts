@@ -2,6 +2,8 @@ import { z } from "zod";
 import {
   appendUnderHeading,
   AUTO_REINFORCE_BOOST,
+  CITED_REINFORCE_BOOST,
+  citedNotes,
   DEFAULT_SPREADING_ACTIVATION_CONFIG,
   getEdgeWeight,
   initInstance,
@@ -50,6 +52,20 @@ export interface ToolContext {
    * overwritten-wholesale, consumed-on-credit lifecycle.
    */
   pendingTermRetrievals: Map<string, { terms: string[]; trigger: TermTrigger }>;
+  /**
+   * Every note read via read_note in this session (VNL-054). Unlike the
+   * session buffer's priming touches, this is deliberately reads only:
+   * appearing in a result list the agent never opened is not something the
+   * agent can then be said to have *used*. Process-lifetime scope, same as
+   * the maps above.
+   */
+  notesRead: Set<string>;
+  /**
+   * `from|to` pairs already credited as citations this session, so rewriting
+   * the same note (a body replacement, an appendUnderHeading, the auto-linker
+   * running again) re-states the same citation without re-paying for it.
+   */
+  citedEdges: Set<string>;
 }
 
 const VAULT_PATH_RULE =
@@ -404,6 +420,38 @@ export const compactWeightsTool = {
   },
 };
 
+/**
+ * VNL-054 — "Referenced" via write-back. The agent read note X this session
+ * and has now written `[[X]]` into a note of its own: the one moment an MCP
+ * server gets to observe a retrieved note reaching the work product, rather
+ * than only observing that it was opened (AIBRAIN-134's evidence-state
+ * taxonomy — see the vault note "Usefulness Signal Roadmap", which files true
+ * Referenced attribution under the model-API gateway this deliberately does
+ * not need).
+ *
+ * Scans only the text the agent supplied in this call, never the note as it
+ * ends up on disk: `writeNoteWithAutoLink` appends its own "Related
+ * (auto-linked)" wikilinks afterwards, and crediting those would turn a
+ * machine-generated section into evidence about the agent's own reasoning.
+ */
+async function creditCitations(ctx: ToolContext, notePath: string, agentText: string): Promise<string[]> {
+  const credited: string[] = [];
+  for (const target of citedNotes(notePath, agentText, ctx.notesRead)) {
+    const key = `${notePath}|${target}`;
+    if (ctx.citedEdges.has(key)) continue;
+    ctx.citedEdges.add(key);
+    await ctx.client.reinforce(
+      notePath,
+      target,
+      CITED_REINFORCE_BOOST,
+      (event) => ctx.activationSocket?.broadcast(event),
+      "cited",
+    );
+    credited.push(target);
+  }
+  return credited;
+}
+
 export const createNoteTool = {
   name: "create_note",
   config: {
@@ -412,7 +460,9 @@ export const createNoteTool = {
       "Creates a new note in the vault with the given frontmatter and body, then automatically " +
       "runs the auto-link scan and appends a changes.jsonl entry — no separate hook or hand-rolled " +
       "script needed, this works from any MCP client. Fails if a note already exists at this path " +
-      "(use update_note instead).",
+      "(use update_note instead). Any [[wikilink]] in the body pointing at a note you read earlier " +
+      "in this session strengthens the link between the two — the returned `cited` list says which, " +
+      "so writing up what you read is itself what teaches the graph.",
     inputSchema: {
       path: vaultRelativePath("Vault-relative note path, without .md extension"),
       frontmatter: z.record(z.string(), z.unknown()).describe("Frontmatter fields (type, created, domain, tags, aliases, etc.)"),
@@ -427,7 +477,8 @@ export const createNoteTool = {
         return textResult({ error: `Note already exists at ${path}. Use update_note instead.` });
       }
       const result = await writeNoteWithAutoLink(ctx.vaultPath, path, frontmatter, body, "create");
-      return textResult({ created: true, ...result });
+      const cited = await creditCitations(ctx, path, body);
+      return textResult({ created: true, ...result, cited });
     },
 };
 
@@ -438,7 +489,9 @@ export const updateNoteTool = {
     description:
       "Updates an existing note — either replacing its body outright, or appending text under a " +
       "heading (creating the heading if absent), matching this vault's '## Updates' / '## Related' " +
-      "append-only convention. Then runs the same auto-link/changelog pipeline as create_note.",
+      "append-only convention. Then runs the same auto-link/changelog pipeline as create_note, " +
+      "including create_note's `cited` write-back: a [[wikilink]] in the text you supply here to a " +
+      "note you read this session strengthens that link.",
     inputSchema: {
       path: vaultRelativePath("Vault-relative note path, without .md extension"),
       body: z.string().optional().describe("Replacement body. Omit if using appendUnderHeading."),
@@ -479,7 +532,11 @@ export const updateNoteTool = {
         "update",
         existing.rawFrontmatter,
       );
-      return textResult({ updated: true, ...result });
+      // Only what this call actually contributed: an appendUnderHeading adds
+      // its `text`, a body replacement is the whole new body (whatever of the
+      // old note the agent chose to carry over included).
+      const cited = await creditCitations(ctx, path, appendOpts ? appendOpts.text : newBody);
+      return textResult({ updated: true, ...result, cited });
     },
 };
 
@@ -504,6 +561,9 @@ export const readNoteTool = {
         await ctx.client.logTraversal(from, path, (event) => ctx.activationSocket?.broadcast(event), "read");
       }
       ctx.lastReadNote = path;
+      // VNL-054: the candidate set for a later citation. Reads only — see
+      // ToolContext.notesRead.
+      ctx.notesRead.add(path);
 
       // Auto-reinforce (AIBRAIN-71): this note surfaced in the session's most
       // recent retrieval call and is now actually being read — a
@@ -599,5 +659,7 @@ export function makeToolContext(vaultPath: string, instanceId: string): ToolCont
     client: initInstance(vaultPath, instanceId),
     pendingRetrievals: new Map(),
     pendingTermRetrievals: new Map(),
+    notesRead: new Set(),
+    citedEdges: new Set(),
   };
 }

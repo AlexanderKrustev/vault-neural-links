@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendEvent } from "@vault-neural-links/core";
+import { appendEvent, computeUsageReport } from "@vault-neural-links/core";
 import {
   ablationDiffTool,
   activateTool,
@@ -377,6 +377,68 @@ describe("mcp-server tools", () => {
 
     await readNoteTool.handler(ctx)({ path: "Shell Aliases" });
     expect(ctx.pendingRetrievals.has("Shell Aliases")).toBe(false);
+  });
+
+  it("create_note reinforces a wikilink to a note read this session (VNL-054)", async () => {
+    await createNoteTool.handler(ctx)({ path: "Kill Process By Port", frontmatter: {}, body: "lsof and kill." });
+    await readNoteTool.handler(ctx)({ path: "Kill Process By Port" });
+
+    const written = parseResult(
+      await createNoteTool.handler(ctx)({
+        path: "Deploy Runbook",
+        frontmatter: {},
+        body: "Free the port first — see [[Kill Process By Port]].",
+      }),
+    );
+    expect(written.cited).toEqual(["Kill Process By Port"]);
+
+    const report = await computeUsageReport(ctx.vaultDataDir);
+    expect(report.mechanismCounts.reinforce.cited).toBe(1);
+
+    // After the report: compaction folds the event log away into
+    // link-weights.json, so the events are no longer there to count.
+    await compactWeightsTool.handler(ctx)({});
+    const weight = parseResult(
+      await getEdgeWeightTool.handler(ctx)({ noteA: "Deploy Runbook", noteB: "Kill Process By Port" }),
+    );
+    expect(weight.weight).toBeGreaterThan(0);
+  });
+
+  it("does not reinforce a wikilink to a note that was never read this session", async () => {
+    await createNoteTool.handler(ctx)({ path: "Kill Process By Port", frontmatter: {}, body: "lsof and kill." });
+
+    const written = parseResult(
+      await createNoteTool.handler(ctx)({
+        path: "Deploy Runbook",
+        frontmatter: {},
+        body: "See [[Kill Process By Port]].",
+      }),
+    );
+
+    expect(written.cited).toEqual([]);
+    const report = await computeUsageReport(ctx.vaultDataDir);
+    expect(report.mechanismCounts.reinforce.cited).toBe(0);
+  });
+
+  it("credits a citation once per session however often the note is rewritten", async () => {
+    await createNoteTool.handler(ctx)({ path: "Kill Process By Port", frontmatter: {}, body: "lsof and kill." });
+    await readNoteTool.handler(ctx)({ path: "Kill Process By Port" });
+    await createNoteTool.handler(ctx)({
+      path: "Deploy Runbook",
+      frontmatter: {},
+      body: "See [[Kill Process By Port]].",
+    });
+
+    const again = parseResult(
+      await updateNoteTool.handler(ctx)({
+        path: "Deploy Runbook",
+        appendUnderHeading: { heading: "## Updates", text: "Still [[Kill Process By Port]]." },
+      }),
+    );
+
+    expect(again.cited).toEqual([]);
+    const report = await computeUsageReport(ctx.vaultDataDir);
+    expect(report.mechanismCounts.reinforce.cited).toBe(1);
   });
 
   it("search_notes queues term learning for its hits, credited when one is read (VNL-053)", async () => {

@@ -50,7 +50,7 @@ describe("computeUsageReport", () => {
     expect(report.typicalSessionMinutes).toBeNull();
     expect(report.mechanismCounts).toEqual({
       traverse: 0,
-      reinforce: { explicit: 0, autoRetrieval: 0 },
+      reinforce: { explicit: 0, autoRetrieval: 0, cited: 0 },
       human: { opens: 0, edits: 0 },
       termLearn: { searchRead: 0, recallRead: 0 },
       activate: { activation: 0, keyword: 0, recency: 0 },
@@ -78,7 +78,7 @@ describe("computeUsageReport", () => {
 
     expect(report.sessionCount).toBe(1);
     expect(report.mechanismCounts.traverse).toBe(1);
-    expect(report.mechanismCounts.reinforce).toEqual({ explicit: 1, autoRetrieval: 0 });
+    expect(report.mechanismCounts.reinforce).toEqual({ explicit: 1, autoRetrieval: 0, cited: 0 });
     expect(report.mechanismCounts.activate).toEqual({ activation: 1, keyword: 1, recency: 0 });
     expect(report.mechanismCounts.getWeightedNeighbors).toBe(1);
     expect(report.mechanismCounts.search).toBe(1);
@@ -117,7 +117,7 @@ describe("computeUsageReport", () => {
 
     const report = await computeUsageReport(dataDir);
 
-    expect(report.mechanismCounts.reinforce).toEqual({ explicit: 0, autoRetrieval: 1 });
+    expect(report.mechanismCounts.reinforce).toEqual({ explicit: 0, autoRetrieval: 1, cited: 0 });
     expect(report.gaps.some((g) => g.includes("All reinforcement signal so far is automatic (1 edge(s)"))).toBe(true);
     expect(report.gaps.some((g) => g.includes("no automatic reinforcement has fired either"))).toBe(false);
   });
@@ -155,6 +155,6 @@ describe("computeUsageReport", () => {
 
     const report = await computeUsageReport(dataDir);
 
-    expect(report.mechanismCounts.reinforce).toEqual({ explicit: 1, autoRetrieval: 0 });
+    expect(report.mechanismCounts.reinforce).toEqual({ explicit: 1, autoRetrieval: 0, cited: 0 });
   });
 });

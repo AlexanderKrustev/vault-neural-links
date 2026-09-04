@@ -73,6 +73,7 @@ export {
 } from "./accountSession.js";
 export { computeUsageReport } from "./usageReport.js";
 export { HumanNavigationTracker } from "./humanSignal.js";
+export { citedNotes } from "./citations.js";
 export {
   learnableQueryTerms,
   liveTermScores,
@@ -119,6 +120,21 @@ const DEFAULT_ACTIVATION_ENERGY = 10;
  * drop from 5 to 1.5, same reason — see that constant's doc comment.
  */
 export const AUTO_REINFORCE_BOOST = 1;
+
+/**
+ * Boost applied when the agent writes `[[X]]` into a note after having read X
+ * this session (VNL-054). Ranked above AUTO_REINFORCE_BOOST because reading a
+ * retrieval result only shows the agent looked; citing it shows the note
+ * reached the work product — the closest an MCP server can get to AIBRAIN-134's
+ * *Referenced* state without a model-API gateway.
+ *
+ * Held at DEFAULT_REINFORCE_BOOST rather than above it, and credited once per
+ * note pair per session by the caller, because AIBRAIN-66 showed how little it
+ * takes for a couple of oversized boosts to pin an arbitrary note at rank 1.
+ * Like every other weight here, this is an opening position for VNL-020's
+ * benchmark to earn or change, not a measurement.
+ */
+export const CITED_REINFORCE_BOOST = 1.5;
 
 export interface VaultLinkClient {
   /**

@@ -139,7 +139,7 @@ describe("HumanNavigationTracker (VNL-052)", () => {
       expect(report.mechanismCounts.human).toEqual({ opens: 1, edits: 1 });
       // Human activity must not be mistaken for the agent's own traffic.
       expect(report.mechanismCounts.traverse).toBe(0);
-      expect(report.mechanismCounts.reinforce).toEqual({ explicit: 0, autoRetrieval: 0 });
+      expect(report.mechanismCounts.reinforce).toEqual({ explicit: 0, autoRetrieval: 0, cited: 0 });
 
       const result = await compact(dataDir);
       expect(result.edgeCount).toBe(1);

@@ -14,10 +14,11 @@ export type EventType = "traverse" | "reinforce" | "decay" | "term";
 export type TraversalTrigger = "read" | "manual" | "human-open";
 /**
  * What actually caused a "reinforce" event — an explicit reinforce_link call,
- * AIBRAIN-71's automatic retrieval-then-read correlation, or the human
- * editing the note they navigated to inside Obsidian (VNL-052).
+ * AIBRAIN-71's automatic retrieval-then-read correlation, the human
+ * editing the note they navigated to inside Obsidian (VNL-052), or the agent
+ * writing a wikilink to a note it read this session (VNL-054).
  */
-export type ReinforceTrigger = "explicit" | "auto-retrieval" | "human-edit";
+export type ReinforceTrigger = "explicit" | "auto-retrieval" | "human-edit" | "cited";
 /** What caused a "term" event — which query-driven tool returned the note that was then read (VNL-053). */
 export type TermTrigger = "search-read" | "recall-read";
 
@@ -554,8 +555,14 @@ export interface UsageReportSession {
 export interface UsageReportMechanismCounts {
   /** Agent-side traversals only (read_note auto-logging and log_traversal) — see `human` for the plugin's. */
   traverse: number;
-  /** Split by trigger (AIBRAIN-71) so the report can tell explicit reinforce_link use apart from automatic retrieval-then-read reinforcement. */
-  reinforce: { explicit: number; autoRetrieval: number };
+  /**
+   * Split by trigger (AIBRAIN-71) so the report can tell explicit
+   * reinforce_link use apart from automatic retrieval-then-read
+   * reinforcement, and both apart from `cited` — VNL-054's write-back
+   * signal, the only one of the three that observes the agent *using* a
+   * note rather than opening it.
+   */
+  reinforce: { explicit: number; autoRetrieval: number; cited: number };
   /**
    * Events contributed by the human moving around Obsidian (VNL-052), kept
    * apart from the agent's counts above: the two have different volumes and

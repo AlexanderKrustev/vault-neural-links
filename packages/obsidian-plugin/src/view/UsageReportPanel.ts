@@ -74,7 +74,20 @@ export class UsageReportPanel {
     mechanisms.createDiv({ text: "Mechanisms fired", cls: "vault-neural-links-usage-section-title" });
     mechanisms.createDiv({ text: `traverse: ${report.mechanismCounts.traverse}`, cls: "vault-neural-links-usage-line" });
     mechanisms.createDiv({
-      text: `reinforce: ${report.mechanismCounts.reinforce.explicit} explicit / ${report.mechanismCounts.reinforce.autoRetrieval} auto-retrieval`,
+      text:
+        `reinforce: ${report.mechanismCounts.reinforce.explicit} explicit / ` +
+        `${report.mechanismCounts.reinforce.autoRetrieval} auto-retrieval / ` +
+        `${report.mechanismCounts.reinforce.cited} cited`,
+      cls: "vault-neural-links-usage-line",
+    });
+    // VNL-053: the term graph is a separate file from the link graph, so it
+    // gets its own line rather than being counted as a reinforcement — the
+    // number here is "a search result was read, and its query's words were
+    // credited to it", not anything that happened to a note-to-note edge.
+    mechanisms.createDiv({
+      text:
+        `learned terms: ${report.mechanismCounts.termLearn.searchRead} from search / ` +
+        `${report.mechanismCounts.termLearn.recallRead} from recall`,
       cls: "vault-neural-links-usage-line",
     });
     mechanisms.createDiv({
