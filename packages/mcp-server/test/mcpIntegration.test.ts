@@ -29,6 +29,17 @@ async function expectRefused(call: Promise<unknown>): Promise<void> {
   expect(result.content[0].text).toMatch(/Must stay inside the vault|validation error/i);
 }
 
+/**
+ * A resource's content is a text-or-blob union in the SDK's types. Everything
+ * this server serves is text, so narrow once here rather than casting at each
+ * assertion — a cast would also hide the day one of them starts returning a blob.
+ */
+function resourceText(result: { contents: unknown[] }, index = 0): string {
+  const entry = result.contents[index] as { text?: unknown };
+  if (typeof entry?.text !== "string") throw new Error("expected a text resource content");
+  return entry.text;
+}
+
 describe("MCP client integration (VNL-007)", () => {
   let vaultPath: string;
   let client: Client;
@@ -139,7 +150,7 @@ describe("MCP client integration (VNL-007)", () => {
 
       expect(result.contents).toHaveLength(1);
       expect(result.contents[0].mimeType).toBe("text/markdown");
-      expect(String(result.contents[0].text)).toContain("Vault briefing");
+      expect(resourceText(result)).toContain("Vault briefing");
     });
 
     it("scopes to a project named in the URI", async () => {
@@ -149,7 +160,7 @@ describe("MCP client integration (VNL-007)", () => {
       });
 
       const result = await client.readResource({ uri: "vault://briefing/Widgets" });
-      const text = String(result.contents[0].text);
+      const text = resourceText(result);
 
       expect(text).toContain("Vault briefing — Widgets");
       expect(text).toContain("Notes/Widgets/Something");
@@ -161,13 +172,13 @@ describe("MCP client integration (VNL-007)", () => {
 
       const result = await client.getPrompt({ name: "vault-briefing" });
       expect(result.messages[0].role).toBe("user");
-      expect(String(result.messages[0].content.text)).toContain("Vault briefing");
+      expect(String((result.messages[0].content as { text?: unknown }).text)).toContain("Vault briefing");
     });
 
     it("returns a briefing rather than failing on an empty vault with no indexes", async () => {
       const result = await client.readResource({ uri: "vault://briefing/nothing-here" });
 
-      expect(String(result.contents[0].text)).toContain("No vault folder matches");
+      expect(resourceText(result)).toContain("No vault folder matches");
     });
   });
 });

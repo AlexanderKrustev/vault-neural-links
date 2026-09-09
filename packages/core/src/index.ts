@@ -48,6 +48,7 @@ export {
   type BriefingNote,
   type BriefingOptions,
 } from "./briefing.js";
+export { branchTokens, detectGitBranch } from "./gitBranch.js";
 export {
   BENCHMARK_CONDITIONS,
   DEFAULT_BENCHMARK_TOP_K,

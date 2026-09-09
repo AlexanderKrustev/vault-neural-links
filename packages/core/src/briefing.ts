@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { decayWeight } from "./decay.js";
 import { loadNoteImportance } from "./importance.js";
 import { listNotes, mostRecentNotes } from "./notes.js";
+import { branchTokens, detectGitBranch } from "./gitBranch.js";
 import { readSupersession } from "./relations.js";
 import { loadWeights } from "./query.js";
 
@@ -52,6 +53,21 @@ export interface Briefing {
   matchedBy: "explicit" | "cwd" | "none";
   /** Vault path prefixes the project resolved to. Empty when unscoped. */
   scopes: string[];
+  /**
+   * The git branch of the working directory, when there is one. Null outside
+   * a repository and on a detached HEAD (VNL-063).
+   */
+  branch: string | null;
+  /**
+   * How the branch was used. `"scope"` means it named a real subfolder and
+   * narrowed the briefing to it — the case worth having, e.g. a `b2b` branch
+   * under a `Bunit2` project. `"filter"` means it matched notes by name only,
+   * which is a hint rather than a boundary. `"none"` means it matched nothing
+   * and the briefing is exactly what it would have been without a branch.
+   */
+  branchUsedAs: "scope" | "filter" | "none";
+  /** Notes matching the branch by name, when the branch did not narrow the scope. */
+  branchRelated: BriefingNote[];
   /** Notes the persisted usage graph says this project has been working with. */
   recentlyUsed: BriefingNote[];
   /** Notes whose files changed most recently. */
@@ -68,6 +84,12 @@ export interface Briefing {
 export interface BriefingOptions {
   /** Overrides project detection entirely. */
   project?: string;
+  /**
+   * Overrides branch detection. Pass `null` to ignore the branch entirely —
+   * a caller that is not in the repository the notes are about should not
+   * have its briefing narrowed by whatever branch it happens to be on.
+   */
+  branch?: string | null;
   /** Working directory whose basename is used when `project` is absent. Defaults to process.cwd(). */
   cwd?: string;
   sectionSize?: number;
@@ -283,8 +305,26 @@ export async function buildBriefing(
   const matchedBy: Briefing["matchedBy"] = opts.project ? "explicit" : "cwd";
 
   const allPaths = await listNotes(vaultPath);
-  const scopes = scopesForProject(allPaths, project);
-  const resolved = scopes.length > 0;
+  const projectScopes = scopesForProject(allPaths, project);
+  const resolved = projectScopes.length > 0;
+
+  // VNL-063. Which branch you are on is often a better statement of what you
+  // are working on than which repository is: on a `Bunit2` project, a `b2b`
+  // branch and a `test` branch want completely different notes, and filling
+  // the context with the wrong half is worse than filling it with nothing.
+  //
+  // Two behaviours, because one would be wrong half the time. When the branch
+  // names a real subfolder of the project it *narrows* — that is a boundary
+  // the vault itself defines, not a guess. When it does not (a branch called
+  // `feature/VNL-063-git-branch` names no folder anywhere), narrowing would
+  // empty the briefing, so the branch becomes a name filter that adds a
+  // section and takes nothing away.
+  const branch = opts.branch === undefined ? await detectGitBranch(opts.cwd ?? process.cwd()) : opts.branch;
+  const tokens = branch ? branchTokens(branch) : [];
+  const branchScopes = branch ? narrowByBranch(allPaths, projectScopes, tokens) : [];
+  const scopes = branchScopes.length > 0 ? branchScopes : projectScopes;
+  const branchUsedAs: Briefing["branchUsedAs"] =
+    branchScopes.length > 0 ? "scope" : tokens.length > 0 ? "filter" : "none";
 
   const [used, changed, importance] = await Promise.all([
     recentlyUsedNotes(vaultDataDir, scopes, sectionSize, now),
@@ -324,12 +364,27 @@ export async function buildBriefing(
     .filter((path) => path.startsWith("MOCs/") && (!resolved || inScope(path, scopes) || matchesMoc(path, project)))
     .slice(0, sectionSize);
 
+  // Only when the branch did not already narrow the scope — otherwise every
+  // note in the briefing matches the branch and the section is noise.
+  // Notes already listed above are deliberately *not* excluded. The section
+  // is emphasis, not a discovery feed: on a small project every matching note
+  // is already in "recently changed", and de-duplicating leaves the reader
+  // with an empty branch section on exactly the projects where the answer was
+  // easiest to give.
+  const branchRelated =
+    branchUsedAs === "filter"
+      ? allPaths.filter((path) => inScope(path, scopes) && matchesTokens(path, tokens)).slice(0, sectionSize)
+      : [];
+
   const inboxCount = allPaths.filter((path) => path.startsWith("Inbox/")).length;
 
   return {
     project: resolved ? project : null,
     matchedBy: resolved ? matchedBy : "none",
     scopes,
+    branch,
+    branchUsedAs,
+    branchRelated: branchRelated.map((path) => decorate(path, `matches branch \`${branch}\``)),
     recentlyUsed: used.map((entry) => {
       const days = daysSince(entry.lastTouched, now);
       return decorate(entry.path, days === null ? "used recently" : `last used ${agePhrase(days)}`);
@@ -343,6 +398,40 @@ export async function buildBriefing(
     inboxCount,
     generatedAt: now.toISOString(),
   };
+}
+
+/**
+ * Subfolders of the project whose name matches a branch token.
+ *
+ * Only ever narrows *within* the project scopes: a branch called `main` on a
+ * repository whose name happens to appear elsewhere in the vault must not be
+ * able to jump the briefing into someone else's folder. Returns empty when
+ * nothing matches, and the caller falls back to the project scope.
+ */
+function narrowByBranch(paths: string[], projectScopes: string[], tokens: string[]): string[] {
+  if (tokens.length === 0 || projectScopes.length === 0) return [];
+  const wanted = new Set(tokens);
+  const scopes = new Set<string>();
+
+  for (const path of paths) {
+    if (!inScope(path, projectScopes)) continue;
+    const segments = path.split("/");
+    for (let i = 0; i < segments.length - 1; i++) {
+      const prefix = segments.slice(0, i + 1).join("/");
+      // Must be strictly inside a project scope, never the scope itself —
+      // otherwise a branch named after the project narrows to everything and
+      // reports itself as having narrowed.
+      if (projectScopes.includes(prefix)) continue;
+      if (wanted.has(normalizeProjectKey(segments[i]))) scopes.add(prefix);
+    }
+  }
+  return [...scopes].sort();
+}
+
+/** True when a note's path contains any branch token as a whole word-ish run. */
+function matchesTokens(path: string, tokens: string[]): boolean {
+  const key = normalizeProjectKey(path);
+  return tokens.some((token) => key.includes(token));
 }
 
 /** A MOC note whose own name is the project, e.g. `MOCs/bunit2` for "Bunit2". */
@@ -367,10 +456,18 @@ export function formatBriefing(briefing: Briefing): string {
   if (briefing.project) {
     lines.push(`# Vault briefing — ${briefing.project}`);
     lines.push("");
-    lines.push(
-      `Scoped to ${briefing.scopes.map((scope) => `\`${scope}\``).join(", ")}` +
-        (briefing.matchedBy === "cwd" ? " (matched from the working directory name)." : "."),
-    );
+    const how = briefing.matchedBy === "cwd" ? " (matched from the working directory name)" : "";
+    lines.push(`Scoped to ${briefing.scopes.map((scope) => `\`${scope}\``).join(", ")}${how}.`);
+    if (briefing.branch) {
+      lines.push(
+        briefing.branchUsedAs === "scope"
+          ? `Narrowed to branch \`${briefing.branch}\`, which names a folder in this project.`
+          : briefing.branchUsedAs === "filter"
+            ? `On branch \`${briefing.branch}\` — it names no folder here, so it is used only to ` +
+              `highlight related notes below, not to narrow anything.`
+            : `On branch \`${briefing.branch}\`.`,
+      );
+    }
   } else {
     lines.push("# Vault briefing");
     lines.push("");
@@ -394,6 +491,7 @@ export function formatBriefing(briefing: Briefing): string {
   section("Recently worked with", briefing.recentlyUsed);
   section("Recently changed", briefing.recentlyChanged);
   section("Central to this project", briefing.central);
+  section(`Related to branch \`${briefing.branch}\``, briefing.branchRelated);
 
   if (briefing.mocs.length > 0) {
     lines.push("## Maps of content");
@@ -410,7 +508,8 @@ export function formatBriefing(briefing: Briefing): string {
   if (
     briefing.recentlyUsed.length === 0 &&
     briefing.recentlyChanged.length === 0 &&
-    briefing.central.length === 0
+    briefing.central.length === 0 &&
+    briefing.branchRelated.length === 0
   ) {
     lines.push("Nothing to report yet — this vault has no usage history or index for this project.");
     lines.push("");

@@ -3,6 +3,7 @@ import { mkdtemp, rm, utimes, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildBriefing, formatBriefing, normalizeProjectKey, scopesForProject } from "../src/briefing.js";
+import { branchTokens, detectGitBranch } from "../src/gitBranch.js";
 import { runImportanceComputation } from "../src/importance.js";
 import { rebuildStructuralIndex } from "../src/structuralLinks.js";
 import { compact } from "../src/compactor.js";
@@ -69,7 +70,7 @@ describe("session briefing (VNL-055)", () => {
     it("says so rather than guessing when nothing matches", async () => {
       await note("Notes/General/Anything", "text");
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "no-such-project" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "no-such-project", branch: null });
 
       expect(briefing.project).toBeNull();
       expect(briefing.matchedBy).toBe("none");
@@ -80,10 +81,10 @@ describe("session briefing (VNL-055)", () => {
     it("reports how the project was resolved", async () => {
       await note("Notes/Widgets/One", "text");
 
-      const explicit = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const explicit = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
       expect(explicit.matchedBy).toBe("explicit");
 
-      const fromCwd = await buildBriefing(vaultPath, dataDir, { cwd: "/home/me/code/widgets" });
+      const fromCwd = await buildBriefing(vaultPath, dataDir, { cwd: "/home/me/code/widgets", branch: null });
       expect(fromCwd.matchedBy).toBe("cwd");
       expect(fromCwd.project).toBe("widgets");
     });
@@ -97,7 +98,7 @@ describe("session briefing (VNL-055)", () => {
       await traverse("Notes/Widgets/Used A", "Notes/Widgets/Used B");
       await compact(dataDir);
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       const paths = briefing.recentlyUsed.map((entry) => entry.path);
       expect(paths).toContain("Notes/Widgets/Used A");
@@ -117,7 +118,7 @@ describe("session briefing (VNL-055)", () => {
       await traverse("Notes/Widgets/Touched Today", "Notes/Widgets/Untouched", 5);
       // Deliberately no compact() — this is the uncompacted case.
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       const today = briefing.recentlyUsed.find((entry) => entry.path === "Notes/Widgets/Touched Today");
       expect(today).toBeDefined();
@@ -145,7 +146,7 @@ describe("session briefing (VNL-055)", () => {
         "utf8",
       );
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       // Present from the compacted weights, but the 999 must not have landed.
       expect(briefing.recentlyUsed.map((e) => e.path)).toContain("Notes/Widgets/A");
@@ -156,7 +157,7 @@ describe("session briefing (VNL-055)", () => {
       await mkdir(join(dataDir, "events"), { recursive: true });
       await writeFile(join(dataDir, "events", "inst-bad.jsonl"), "{not json at all\n", "utf8");
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       expect(briefing.recentlyChanged.map((e) => e.path)).toContain("Notes/Widgets/A");
     });
@@ -167,7 +168,7 @@ describe("session briefing (VNL-055)", () => {
       await rebuildStructuralIndex(vaultPath, dataDir);
       await runImportanceComputation(dataDir);
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       for (const section of [briefing.recentlyUsed, briefing.recentlyChanged, briefing.central]) {
         expect(section.map((entry) => entry.path)).not.toContain("Notes/Gadgets/Theirs");
@@ -180,7 +181,7 @@ describe("session briefing (VNL-055)", () => {
       const old = new Date(Date.now() - 30 * 86_400_000);
       await utimes(toFilePath(vaultPath, "Notes/Widgets/Old"), old, old);
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       expect(briefing.recentlyChanged[0].path).toBe("Notes/Widgets/New");
       expect(briefing.recentlyChanged.map((e) => e.path)).toContain("Notes/Widgets/Old");
@@ -199,7 +200,7 @@ describe("session briefing (VNL-055)", () => {
       });
       await note("Notes/Widgets/New Decision", "free first");
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       const old = briefing.recentlyChanged.find((entry) => entry.path === "Notes/Widgets/Old Decision");
       expect(old?.supersededBy).toBeTruthy();
@@ -211,7 +212,7 @@ describe("session briefing (VNL-055)", () => {
       await note("Inbox/Another", "raw");
       await note("Notes/Widgets/Real", "text");
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       expect(briefing.inboxCount).toBe(2);
       expect(formatBriefing(briefing)).toContain("2 unprocessed items");
@@ -221,9 +222,124 @@ describe("session briefing (VNL-055)", () => {
       await note("MOCs/Widgets", "the index for widgets");
       await note("Notes/Widgets/One", "text");
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       expect(briefing.mocs).toContain("MOCs/Widgets");
+    });
+  });
+
+  // VNL-063. Which branch you are on is often a sharper statement of what
+  // you are working on than which repository is. The founder's own case: on
+  // a Bunit2 project, a `b2b` branch and a `test` branch want completely
+  // different notes, and filling the context with the wrong half is worse
+  // than filling it with nothing.
+  describe("git branch", () => {
+    it("keeps only the meaningful parts of a branch name", () => {
+      expect(branchTokens("feature/BUN-42-b2b-cutover")).toEqual(["bun", "42", "b2b", "cutover"]);
+      // Workflow prefixes say what kind of work it is, not what it is about.
+      expect(branchTokens("main")).toEqual([]);
+      expect(branchTokens("hotfix/x")).toEqual([]);
+    });
+
+    it("narrows to a subfolder when the branch names one", async () => {
+      await note("Notes/Bunit2/b2b/Cutover Plan", "b2b work");
+      await note("Notes/Bunit2/Analysis/Something Else", "unrelated work");
+
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Bunit2", branch: "b2b" });
+
+      expect(briefing.branchUsedAs).toBe("scope");
+      expect(briefing.scopes).toEqual(["Notes/Bunit2/b2b"]);
+      const paths = briefing.recentlyChanged.map((entry) => entry.path);
+      expect(paths).toContain("Notes/Bunit2/b2b/Cutover Plan");
+      expect(paths).not.toContain("Notes/Bunit2/Analysis/Something Else");
+      expect(formatBriefing(briefing)).toContain("Narrowed to branch");
+    });
+
+    // The common case: branches are usually named after tickets, not folders.
+    // Narrowing on those would empty the briefing, which is the failure mode
+    // worth avoiding.
+    it("falls back to highlighting, never narrowing, when the branch names no folder", async () => {
+      await note("Notes/Widgets/VNL-063 Design", "about the ticket");
+      await note("Notes/Widgets/Unrelated", "other work");
+
+      const briefing = await buildBriefing(vaultPath, dataDir, {
+        project: "Widgets",
+        branch: "feature/VNL-063-git-branch",
+      });
+
+      expect(briefing.branchUsedAs).toBe("filter");
+      expect(briefing.scopes).toEqual(["Notes/Widgets"]);
+      // Nothing was removed...
+      expect(briefing.recentlyChanged.map((e) => e.path)).toContain("Notes/Widgets/Unrelated");
+      // ...and the matching note is called out.
+      expect(briefing.branchRelated.map((e) => e.path)).toContain("Notes/Widgets/VNL-063 Design");
+      expect(formatBriefing(briefing)).toContain("it names no folder here");
+    });
+
+    it("never lets a branch jump the scope into another project's folder", async () => {
+      await note("Notes/Widgets/Mine", "in scope");
+      await note("Notes/Gadgets/b2b/Theirs", "another project entirely");
+
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: "b2b" });
+
+      expect(briefing.scopes).toEqual(["Notes/Widgets"]);
+      expect(briefing.recentlyChanged.map((e) => e.path)).not.toContain("Notes/Gadgets/b2b/Theirs");
+    });
+
+    it("does not narrow to the project scope itself when the branch is named after the project", async () => {
+      await note("Notes/Widgets/One", "text");
+
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: "widgets" });
+
+      // Reporting "narrowed" while changing nothing would be a lie.
+      expect(briefing.branchUsedAs).not.toBe("scope");
+      expect(briefing.scopes).toEqual(["Notes/Widgets"]);
+    });
+
+    it("ignores the branch entirely when the caller passes null", async () => {
+      await note("Notes/Bunit2/b2b/Cutover Plan", "b2b work");
+      await note("Notes/Bunit2/Analysis/Something Else", "unrelated");
+
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Bunit2", branch: null });
+
+      expect(briefing.branch).toBeNull();
+      expect(briefing.branchUsedAs).toBe("none");
+      expect(briefing.scopes).toEqual(["Notes/Bunit2"]);
+    });
+
+    it("reads the branch from a real .git directory, and reports none when detached", async () => {
+      const repo = await mkdtemp(join(tmpdir(), "vnl-test-repo-"));
+      await mkdir(join(repo, ".git"), { recursive: true });
+      await writeFile(join(repo, ".git", "HEAD"), "ref: refs/heads/feature/b2b\n", "utf8");
+      expect(await detectGitBranch(repo)).toBe("feature/b2b");
+
+      // Walks up from a subdirectory, the way a build in packages/x does.
+      await mkdir(join(repo, "packages", "core"), { recursive: true });
+      expect(await detectGitBranch(join(repo, "packages", "core"))).toBe("feature/b2b");
+
+      await writeFile(join(repo, ".git", "HEAD"), "9f1c2b3d4e5f\n", "utf8");
+      expect(await detectGitBranch(repo)).toBeNull();
+
+      await rm(repo, { recursive: true, force: true });
+    });
+
+    it("resolves the .git-as-a-file form used by worktrees", async () => {
+      const root = await mkdtemp(join(tmpdir(), "vnl-test-worktree-"));
+      const realGit = join(root, "actual-git");
+      await mkdir(realGit, { recursive: true });
+      await writeFile(join(realGit, "HEAD"), "ref: refs/heads/wt-branch\n", "utf8");
+
+      const worktree = join(root, "wt");
+      await mkdir(worktree, { recursive: true });
+      await writeFile(join(worktree, ".git"), `gitdir: ${realGit}\n`, "utf8");
+
+      expect(await detectGitBranch(worktree)).toBe("wt-branch");
+
+      await rm(root, { recursive: true, force: true });
+    });
+
+    it("returns no branch outside a repository", async () => {
+      expect(await detectGitBranch(vaultPath)).toBeNull();
     });
   });
 
@@ -233,7 +349,7 @@ describe("session briefing (VNL-055)", () => {
     it("produces a briefing on a vault with no indexes and no usage history", async () => {
       await note("Notes/Widgets/Only Note", "text");
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
 
       expect(briefing.recentlyUsed).toEqual([]);
       expect(briefing.central).toEqual([]);
@@ -246,7 +362,7 @@ describe("session briefing (VNL-055)", () => {
       // A folder with no notes in it: the scope resolves, the content does not.
       await writeFile(join(vaultPath, "Notes", "Widgets", "placeholder.txt"), "not a note", "utf8");
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets" });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
       const text = formatBriefing(briefing);
 
       expect(text).toContain("Nothing to report yet");
@@ -256,7 +372,7 @@ describe("session briefing (VNL-055)", () => {
     it("keeps each section short enough to be read", async () => {
       for (let i = 0; i < 30; i++) await note(`Notes/Widgets/Note ${i}`, "text");
 
-      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", sectionSize: 3 });
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", sectionSize: 3, branch: null });
 
       expect(briefing.recentlyChanged.length).toBe(3);
     });
