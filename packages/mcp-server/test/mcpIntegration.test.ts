@@ -191,6 +191,24 @@ describe("MCP client integration (VNL-007)", () => {
       expect(instructions).toContain("A Note");
     });
 
+    // The SessionStart hook this replaces always flagged the inbox, whatever
+    // directory the session was in. Losing that whenever no project matched
+    // would be a quiet regression against the thing being retired.
+    it("flags a waiting inbox even when no project resolves", async () => {
+      await client.callTool({
+        name: "create_note",
+        arguments: { path: "Inbox/Scribble", frontmatter: {}, body: "raw" },
+      });
+
+      const instructions = await buildServerInstructions(makeToolContext(vaultPath, "x"), {
+        cwd: "/nowhere/unmatched",
+      });
+
+      expect(instructions).not.toContain("Vault briefing");
+      expect(instructions).toContain("1 unprocessed note");
+      expect(instructions).toContain("/process-inbox");
+    });
+
     it("survives a vault it cannot read, rather than failing to start", async () => {
       const missing = join(tmpdir(), "vnl-does-not-exist-", String(Date.now()));
       const instructions = await buildServerInstructions(makeToolContext(missing, "x"));

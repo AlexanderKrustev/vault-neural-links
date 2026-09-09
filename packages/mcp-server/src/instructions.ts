@@ -74,13 +74,28 @@ export async function buildServerInstructions(
 
   if (!briefing) return STATIC_INSTRUCTIONS;
 
-  // A briefing that matched no project is a list of whatever the vault
-  // touched most recently, which is noise in front of every session. The
-  // static half still goes out; the vault half waits until it has something
-  // to say about *this* project.
-  if (!briefing.project) return STATIC_INSTRUCTIONS;
+  const parts = [STATIC_INSTRUCTIONS];
 
-  return `${STATIC_INSTRUCTIONS}\n\n---\n\n${formatBriefing(briefing)}`;
+  // A briefing that matched no project is a list of whatever the vault
+  // touched most recently, which is noise in front of every session — so the
+  // project half waits until it has something to say about *this* project.
+  if (briefing.project) parts.push(formatBriefing(briefing));
+
+  // The inbox flag is deliberately outside that condition. It is the one
+  // thing here that is true of the vault rather than of the project, and the
+  // SessionStart hook this replaced always emitted it — dropping it whenever
+  // no project resolved would be a quiet regression against the behaviour
+  // being retired. `inboxCount` is computed over the whole vault rather than
+  // the project scope, for the same reason.
+  if (briefing.inboxCount > 0 && !briefing.project) {
+    parts.push(
+      `${briefing.inboxCount} unprocessed note${briefing.inboxCount === 1 ? "" : "s"} are waiting in ` +
+        "`Inbox/`. Mention this and suggest `/process-inbox`, unless the user's own first message is " +
+        "already about the inbox.",
+    );
+  }
+
+  return parts.join("\n\n---\n\n");
 }
 
 /**

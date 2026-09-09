@@ -501,7 +501,10 @@ export function formatBriefing(briefing: Briefing): string {
 
   if (briefing.inboxCount > 0) {
     lines.push(`## Inbox`);
-    lines.push(`${briefing.inboxCount} unprocessed item${briefing.inboxCount === 1 ? "" : "s"} in \`Inbox/\`.`);
+    lines.push(
+      `${briefing.inboxCount} unprocessed item${briefing.inboxCount === 1 ? "" : "s"} in \`Inbox/\` — ` +
+        "worth mentioning and offering `/process-inbox`.",
+    );
     lines.push("");
   }
 
