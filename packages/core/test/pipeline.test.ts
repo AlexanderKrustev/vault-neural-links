@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "../src/logger.js";
 import { compact } from "../src/compactor.js";
+import { DEFAULT_ABLATION_LAYERS } from "../src/types.js";
 import { getEdgeWeight, getWeightedNeighbors } from "../src/query.js";
 import { rebuildStructuralIndex } from "../src/structuralLinks.js";
 import { runImportanceComputation } from "../src/importance.js";
@@ -145,13 +146,17 @@ describe("reactivation-day tracking", () => {
     await appendEvent(dataDir, "inst-1", event({ from: "A", to: "B", ts: old, weight_delta: 10 }));
     await compact(dataDir);
 
-    const withoutConsolidation = await getEdgeWeight(dataDir, "A", "B");
+    // VNL-058: consolidation is no longer in the default serving path (it
+    // measured bit-identical on the real vault), so this asks for it
+    // explicitly. The mechanism still works; it is simply not what retrieval
+    // runs until a measurement earns it back.
+    const withoutConsolidation = await getEdgeWeight(dataDir, "A", "B", undefined, DEFAULT_ABLATION_LAYERS);
 
     const raw = JSON.parse(await readFile(join(dataDir, "link-weights.json"), "utf8"));
     raw.edges["A|B"].consolidatedScore = 50;
     await writeFile(join(dataDir, "link-weights.json"), JSON.stringify(raw), "utf8");
 
-    const withConsolidation = await getEdgeWeight(dataDir, "A", "B");
+    const withConsolidation = await getEdgeWeight(dataDir, "A", "B", undefined, DEFAULT_ABLATION_LAYERS);
     expect(withConsolidation).toBeCloseTo(withoutConsolidation! + 50, 5);
   });
 });
@@ -365,7 +370,9 @@ describe("AIBRAIN-21: PageRank importance blended into retrieval weight", () => 
     await appendEvent(dataDir, "inst-1", event({ from: "A", to: "Leaf", weight_delta: 3 }));
     await compact(dataDir);
 
-    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath);
+    // VNL-058: importance left the default serving path for the same reason
+    // consolidation did — measured bit-identical — so it is requested here.
+    const neighbors = await getWeightedNeighbors(dataDir, "A", 10, vaultPath, undefined, DEFAULT_ABLATION_LAYERS);
     const hub = neighbors.find((n) => n.path === "Hub")!;
     const leaf = neighbors.find((n) => n.path === "Leaf")!;
 

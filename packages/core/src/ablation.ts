@@ -21,6 +21,16 @@ const ENERGY_EPSILON = 1e-9;
  * depended partly on the ablated layer even though it still cleared
  * threshold). Notes whose energy is unchanged (within floating-point
  * epsilon) are omitted from the diff — they're unaffected by the ablation.
+ *
+ * The baseline here is `DEFAULT_ABLATION_LAYERS` — every mechanism on —
+ * which since VNL-058 is deliberately *not* what retrieval runs
+ * (`HOT_PATH_ABLATION_LAYERS` leaves importance and consolidation out).
+ * That is still the right baseline for this tool: the question it answers is
+ * "what does this mechanism contribute", which needs the mechanism enabled on
+ * one side of the comparison to mean anything. It does mean a diff here
+ * describes the full engine rather than the serving path — so a layer that
+ * shows a contribution here is a candidate for the diet to re-examine, not
+ * evidence that production is already using it.
  */
 export async function runAblationComparison(
   vaultDataDir: string,

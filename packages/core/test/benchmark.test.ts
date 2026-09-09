@@ -81,7 +81,12 @@ const topicProvider: EmbeddingProvider = {
   },
 };
 
-describe("VNL-020 benchmark", () => {
+// Each case runs the whole query set through four retrieval configurations,
+// which is seconds rather than milliseconds. The default 5s timeout was close
+// enough to the real cost that these flaked the moment the machine was busy
+// with anything else — a benchmark that fails under load teaches nothing
+// about the benchmark.
+describe("VNL-020 benchmark", { timeout: 30_000 }, () => {
   let dataDir: string;
   let queries: BenchmarkQuery[];
 

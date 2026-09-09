@@ -18,13 +18,14 @@ import { readSupersession } from "./relations.js";
 import { liveTermScores } from "./termWeights.js";
 import { tokenize } from "./tokenize.js";
 import type {
+  AblationLayers,
   ActivationEventSink,
   ContentIndexFile,
   EmbeddingsFile,
   LinkWeightsFile,
   SpreadingActivationConfig,
 } from "./types.js";
-import { DEFAULT_SPREADING_ACTIVATION_CONFIG } from "./types.js";
+import { DEFAULT_SPREADING_ACTIVATION_CONFIG, HOT_PATH_ABLATION_LAYERS } from "./types.js";
 
 /**
  * VNL-050. The engine's entry point used to be a *note* (`activate(note)`),
@@ -276,6 +277,16 @@ export interface RecallOptions {
   /** Wall-clock bound for the graph phase; lexical scoring always completes. */
   budgetMs?: number;
   activationConfig?: SpreadingActivationConfig;
+  /**
+   * Which of the engine's own mechanisms the graph phase applies (VNL-058).
+   *
+   * Reachable from here so the benchmark can measure them through the path
+   * that actually serves queries. Until this existed the layers could only be
+   * ablated through `activate()`, i.e. through the note-to-note entry point
+   * the 2026-09-02 audit found circular — so "this mechanism earns its place"
+   * was an assertion about a code path nobody queries.
+   */
+  layers?: AblationLayers;
   onEvent?: ActivationEventSink;
   now?: Date;
 }
@@ -684,6 +695,7 @@ export async function recall(
     embeddingProvider,
     budgetMs = DEFAULT_GRAPH_BUDGET_MS,
     activationConfig = DEFAULT_SPREADING_ACTIVATION_CONFIG,
+    layers = HOT_PATH_ABLATION_LAYERS,
     onEvent,
     now = new Date(),
   } = opts;
@@ -827,6 +839,7 @@ export async function recall(
       sessionBuffer,
       onEvent,
       deadline,
+      layers,
     );
 
     for (const node of activated) {

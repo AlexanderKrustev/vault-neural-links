@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AblationLayers, ActivatedNote, ActivationEventSink, SpreadingActivationConfig } from "./types.js";
-import { DEFAULT_ABLATION_LAYERS, DEFAULT_SPREADING_ACTIVATION_CONFIG } from "./types.js";
+import { DEFAULT_SPREADING_ACTIVATION_CONFIG, HOT_PATH_ABLATION_LAYERS } from "./types.js";
 import { computeLiveNeighborWeights } from "./query.js";
 import type { SessionBuffer } from "./priming.js";
 
@@ -41,7 +41,7 @@ export async function activate(
   sessionBuffer?: SessionBuffer,
   onEvent?: ActivationEventSink,
   deadline?: number,
-  layers: AblationLayers = DEFAULT_ABLATION_LAYERS,
+  layers: AblationLayers = HOT_PATH_ABLATION_LAYERS,
 ): Promise<ActivatedNote[]> {
   const accumulated = new Map<string, { energy: number; hops: number }>();
   const runId = randomUUID();

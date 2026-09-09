@@ -10,6 +10,7 @@ import { writeNote, toFilePath } from "../src/notes.js";
 import { SessionBuffer } from "../src/priming.js";
 import { recall } from "../src/recall.js";
 import { rebuildStructuralIndex } from "../src/structuralLinks.js";
+import { DEFAULT_ABLATION_LAYERS, HOT_PATH_ABLATION_LAYERS } from "../src/types.js";
 import { termEvents } from "../src/termWeights.js";
 
 describe("recall", () => {
@@ -268,6 +269,48 @@ describe("recall", () => {
     const result = await recall(vaultPath, dataDir, "spreading activation write-up");
 
     expect(result.hits.map((hit) => hit.path)).toContain("Sibling Note");
+  });
+
+  // --- VNL-058: the mechanism diet -----------------------------------------
+  describe("mechanism layers", () => {
+    it("runs the measured set by default, not every mechanism that exists", () => {
+      // Measured through `recall` on the real 492-note vault with VNL-020's
+      // 70 queries: importance and consolidation were bit-identical with and
+      // without, individually and together. Both stay in the code and stay
+      // reachable; neither is in the path a query takes.
+      expect(HOT_PATH_ABLATION_LAYERS.importance).toBe(false);
+      expect(HOT_PATH_ABLATION_LAYERS.consolidation).toBe(false);
+      // The one layer whose removal is visible: 0.6835 vs 0.6974 MRR.
+      expect(HOT_PATH_ABLATION_LAYERS.structuralFallback).toBe(true);
+
+      // The ablation baseline is unchanged and still means "everything on",
+      // or `runAblationComparison` would be measuring against the diet
+      // rather than against the full engine.
+      expect(DEFAULT_ABLATION_LAYERS).toEqual({
+        priming: true,
+        importance: true,
+        consolidation: true,
+        structuralFallback: true,
+      });
+    });
+
+    it("still lets a caller ask for a mechanism the default leaves out", async () => {
+      await note("Kill Process By Port", "lsof and kill.");
+      await note("Neighbour", "linked from the first note");
+      await rebuildContentIndex(vaultPath, dataDir);
+      await traverse("Kill Process By Port", "Neighbour");
+      await compact(dataDir);
+
+      // Not asserting a ranking difference — the point of the diet is that
+      // there isn't one on measured corpora. The contract being kept is that
+      // the mechanisms remain reachable rather than deleted, so a future
+      // vault with denser links or more history can measure them again.
+      const result = await recall(vaultPath, dataDir, "kill process by port", {
+        layers: DEFAULT_ABLATION_LAYERS,
+      });
+
+      expect(result.hits[0].path).toBe("Kill Process By Port");
+    });
   });
 
   // --- VNL-056: staleness and supersession conflicts -----------------------

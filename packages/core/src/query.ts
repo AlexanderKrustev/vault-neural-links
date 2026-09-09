@@ -9,7 +9,12 @@ import type {
   StructuralFallbackConfig,
   WeightedNeighbor,
 } from "./types.js";
-import { DEFAULT_ABLATION_LAYERS, DEFAULT_IMPORTANCE_CONFIG, DEFAULT_PRIMING_CONFIG, DEFAULT_STRUCTURAL_FALLBACK_CONFIG } from "./types.js";
+import {
+  DEFAULT_IMPORTANCE_CONFIG,
+  DEFAULT_PRIMING_CONFIG,
+  DEFAULT_STRUCTURAL_FALLBACK_CONFIG,
+  HOT_PATH_ABLATION_LAYERS,
+} from "./types.js";
 import { decayWeight, resolveHalfLifeDays } from "./decay.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { loadNoteImportance } from "./importance.js";
@@ -69,7 +74,7 @@ async function liveWeight(
   record: EdgeRecord,
   now: Date,
   decayConfig?: NoteTypeDecayConfig,
-  layers: AblationLayers = DEFAULT_ABLATION_LAYERS,
+  layers: AblationLayers = HOT_PATH_ABLATION_LAYERS,
 ): Promise<number> {
   const noteType = vaultPath ? await readNoteType(vaultPath, notePath) : undefined;
   const halfLifeDays = resolveHalfLifeDays(noteType, decayConfig);
@@ -115,7 +120,7 @@ export async function computeLiveNeighborWeights(
   sessionBuffer?: SessionBuffer,
   structuralFallback: StructuralFallbackConfig = DEFAULT_STRUCTURAL_FALLBACK_CONFIG,
   importanceConfig: ImportanceConfig = DEFAULT_IMPORTANCE_CONFIG,
-  layers: AblationLayers = DEFAULT_ABLATION_LAYERS,
+  layers: AblationLayers = HOT_PATH_ABLATION_LAYERS,
 ): Promise<WeightedNeighbor[]> {
   const weights = await loadWeights(vaultDataDir);
   const importance = layers.importance ? await loadNoteImportance(vaultDataDir) : null;
@@ -225,8 +230,17 @@ export async function getWeightedNeighbors(
   topK = 10,
   vaultPath?: string,
   sessionBuffer?: SessionBuffer,
+  layers: AblationLayers = HOT_PATH_ABLATION_LAYERS,
 ): Promise<WeightedNeighbor[]> {
-  const neighbors = await computeLiveNeighborWeights(vaultDataDir, note, vaultPath, sessionBuffer);
+  const neighbors = await computeLiveNeighborWeights(
+    vaultDataDir,
+    note,
+    vaultPath,
+    sessionBuffer,
+    undefined,
+    undefined,
+    layers,
+  );
 
   neighbors.sort((x, y) => y.weight - x.weight);
   const topNeighbors = neighbors.slice(0, topK);
@@ -250,11 +264,12 @@ export async function getEdgeWeight(
   noteA: string,
   noteB: string,
   vaultPath?: string,
+  layers: AblationLayers = HOT_PATH_ABLATION_LAYERS,
 ): Promise<number | undefined> {
   const weights = await loadWeights(vaultDataDir);
   if (!weights) return undefined;
   const key = [noteA, noteB].sort().join("|");
   const record = weights.edges[key];
   if (!record) return undefined;
-  return liveWeight(vaultPath, noteB, record, new Date());
+  return liveWeight(vaultPath, noteB, record, new Date(), undefined, layers);
 }

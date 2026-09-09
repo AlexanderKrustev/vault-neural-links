@@ -396,10 +396,50 @@ export interface AblationLayers {
   structuralFallback: boolean;
 }
 
+/**
+ * Every mechanism enabled. This is the *reference* configuration that
+ * `runAblationComparison` measures against, not what the serving path runs —
+ * see `HOT_PATH_ABLATION_LAYERS`.
+ */
 export const DEFAULT_ABLATION_LAYERS: AblationLayers = {
   priming: true,
   importance: true,
   consolidation: true,
+  structuralFallback: true,
+};
+
+/**
+ * What retrieval actually runs (VNL-058 — the mechanism diet).
+ *
+ * Measured through `recall` against the real 492-note vault with VNL-020's
+ * 70-query set, cold. Disabling `importance` and disabling `consolidation`
+ * each produced results **bit-identical** to leaving them on — 0.6974 MRR,
+ * 41/70 rank-1, 68/70 found, to four decimal places, individually and
+ * together. They are not small effects; on this corpus they are no effect.
+ *
+ * Both stay in the code and stay reachable, because "no effect on this vault
+ * today" is not "no effect": consolidation needs three distinct-day
+ * reactivations inside a week before it scores anything at all (AIBRAIN-31
+ * measured it inert for the same reason two months ago), and importance is a
+ * PageRank multiplier that needs a denser link graph than eight weeks of use
+ * produces. What changes is that neither is in the path by default, and
+ * neither is claimed in the README until a measurement earns it back.
+ *
+ * `structuralFallback` stays on: it is the only layer whose removal is
+ * visible — 0.6835 MRR and 39/70 rank-1, i.e. it is carrying real retrieval,
+ * exactly as AIBRAIN-31 found.
+ *
+ * `priming` stays on pending a decision, not because it measured well. It is
+ * +0.039 MRR in the target-primed condition and **−0.017 in the
+ * related-primed one** — it helps when the buffer already holds the answer,
+ * which is the circular case, and hurts in the realistic case where you have
+ * been reading around a subject. Flipping it is a positioning decision as
+ * much as a technical one, since D3 names session priming in the headline.
+ */
+export const HOT_PATH_ABLATION_LAYERS: AblationLayers = {
+  priming: true,
+  importance: false,
+  consolidation: false,
   structuralFallback: true,
 };
 

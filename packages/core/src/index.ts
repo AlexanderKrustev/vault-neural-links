@@ -397,3 +397,5 @@ export function initInstance(vaultPath: string, instanceId: string = randomUUID(
     },
   };
 }
+
+export { HOT_PATH_ABLATION_LAYERS } from "./types.js";
