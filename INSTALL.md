@@ -53,6 +53,34 @@ the pipeline simply doesn't run on days the vault isn't opened in Obsidian.
 CLI fallbacks (e.g. headless/non-Obsidian setups) but are no longer part
 of the standard install.
 
+## 4b. Optional: semantic matching (VNL-051)
+
+Skip this unless you want `recall` to match notes by meaning as well as by
+words. It is off by default and nothing depends on it.
+
+```bash
+npm install @huggingface/transformers   # alongside the MCP server
+```
+
+Then turn on **"Match meaning, not just words"** in the plugin's settings.
+The next nightly run embeds every note locally and writes
+`.vault-neural-links/embeddings.json`; from then on `recall` blends cosine
+similarity into its ranking and reports a `semanticScore` per hit.
+
+Two things worth knowing before enabling it:
+
+- **The first build downloads a ~23 MB model** (all-MiniLM-L6-v2, ONNX)
+  from HuggingFace's CDN. That is the only network request this project
+  makes. Everything after it runs offline on your machine, and note text is
+  never sent anywhere.
+- **The first build takes a while** — roughly a second per few notes on a
+  laptop CPU, once. Later runs only re-embed notes whose text changed.
+
+If the package isn't installed, or the model can't load, the setting has no
+effect and retrieval behaves exactly as it does without it. Vaults above
+50,000 notes are skipped until the SQLite-backed index (VNL-031) lands: the
+vector file is read and scanned per query, same as the content index.
+
 ## 5. Exclude `.vault-neural-links/` from file sync
 
 If the vault lives in OneDrive, iCloud Drive, Dropbox or any other syncing

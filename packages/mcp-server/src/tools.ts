@@ -122,9 +122,12 @@ export const recallTool = {
       "the notes that match, spreading activation over the usage-weighted link graph expands and " +
       "re-ranks them so notes the vault's own link/usage structure says belong with the matches " +
       "surface too, and what past searches have taught the engine your own words mean can surface " +
-      "a note even when nothing in today's query text matches it. Each hit comes back with a snippet and a " +
+      "a note even when nothing in today's query text matches it. Where the vault has the optional " +
+      "local embedding index enabled, meaning is matched too, so a note that shares no word with " +
+      "the query but says the same thing can surface on its own. Each hit comes back with a snippet and a " +
       "`why` (matched terms, the seed note and hop count the graph reached it through, activation " +
-      "energy, any learned term association and its score, days since the file changed, and " +
+      "energy, any learned term association and its score, `semanticScore` when the embedding " +
+      "index is in use, days since the file changed, and " +
       "`supersededBy` when the note is marked outdated), so results can be triaged without a " +
       "read_note call each. Reading a result afterward also teaches the engine what this query's " +
       "words mean for you, going forward. Use search_notes instead only when you want a literal " +

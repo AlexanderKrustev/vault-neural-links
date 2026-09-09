@@ -12,6 +12,13 @@ export interface VaultNeuralLinksSettings {
    * only — nothing is ever sent anywhere.
    */
   logHumanNavigation: boolean;
+  /**
+   * VNL-051: build a local semantic index of the vault so retrieval can
+   * match meaning, not just words. Off by default — it needs an optional
+   * ~23 MB model the user installs separately, and until they have, turning
+   * it on does nothing.
+   */
+  semanticIndex: boolean;
   /** rendering-only pacing for live activation events — "study" staggers hops ~150-300ms apart; engine timing itself is never altered */
   playbackMode: "live" | "study";
 }
@@ -22,5 +29,6 @@ export const DEFAULT_SETTINGS: VaultNeuralLinksSettings = {
   minWeightFilter: 0,
   continuousAnimation: false,
   logHumanNavigation: true,
+  semanticIndex: false,
   playbackMode: "live",
 };

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compact } from "../src/compactor.js";
 import { rebuildContentIndex } from "../src/contentIndex.js";
+import { rebuildEmbeddings, type EmbeddingProvider } from "../src/embeddings.js";
 import { appendEvent } from "../src/logger.js";
 import { writeNote, toFilePath } from "../src/notes.js";
 import { SessionBuffer } from "../src/priming.js";
@@ -267,5 +268,175 @@ describe("recall", () => {
     const result = await recall(vaultPath, dataDir, "spreading activation write-up");
 
     expect(result.hits.map((hit) => hit.path)).toContain("Sibling Note");
+  });
+
+  // --- VNL-051: the semantic axis ------------------------------------------
+  // A fake provider throughout: these assert the blend, not the model. What
+  // "means the same thing" means is declared by the test, so the ranking
+  // being verified is the engine's, not MiniLM's.
+  describe("semantic axis", () => {
+    function provider(vectors: Record<string, number[]>, model = "test-model") {
+      const calls: string[][] = [];
+      return {
+        model,
+        dim: 3,
+        calls,
+        async embed(texts: string[]) {
+          calls.push(texts);
+          return texts.map((text) => {
+            const hit = Object.entries(vectors).find(([key]) => text.toLowerCase().includes(key.toLowerCase()));
+            return Float32Array.from(hit ? hit[1] : [0, 0, 1]);
+          });
+        },
+      };
+    }
+
+    async function buildEmbeddings(
+      embeddingProvider: EmbeddingProvider,
+      nodes: { id: string; body: string }[],
+    ) {
+      return rebuildEmbeddings(
+        dataDir,
+        nodes.map((entry) => ({ ...entry, aliases: [] })),
+        embeddingProvider,
+      );
+    }
+
+    it("surfaces a note that shares no word with the query, on meaning alone", async () => {
+      await note("Terminate A Listening Service", "How to stop whatever holds a socket open.");
+      await note("Gardening", "Tomatoes need water.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      // The query and the note are declared to be near-identical in vector
+      // space; they share no tokens, so BM25 scores the note zero.
+      const embeddingProvider = provider({
+        "kill process by port": [1, 0, 0],
+        "Terminate A Listening Service": [0.98, 0.2, 0],
+      });
+      await buildEmbeddings(embeddingProvider, [
+        { id: "Terminate A Listening Service", body: "How to stop whatever holds a socket open." },
+        { id: "Gardening", body: "Tomatoes need water." },
+      ]);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", { embeddingProvider });
+
+      const hit = result.hits.find((entry) => entry.path === "Terminate A Listening Service");
+      expect(hit).toBeDefined();
+      expect(hit!.source).toBe("semantic");
+      expect(hit!.why.lexicalScore).toBe(0);
+      expect(hit!.why.semanticScore).toBeGreaterThan(0.9);
+      // And it comes with a snippet, like every other hit — a semantic-only
+      // hit was never read during the lexical phase.
+      expect(hit!.snippet).toContain("socket");
+    });
+
+    it("labels a note that matched text as lexical, but still reports its semantic score", async () => {
+      await note("Kill Process By Port", "Use lsof to find the process listening on a port and kill it.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const embeddingProvider = provider({
+        "kill process by port": [1, 0, 0],
+        "Kill Process By Port": [1, 0, 0],
+      });
+      await buildEmbeddings(embeddingProvider, [
+        { id: "Kill Process By Port", body: "Use lsof to find the process listening on a port and kill it." },
+      ]);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", { embeddingProvider });
+
+      expect(result.hits[0].path).toBe("Kill Process By Port");
+      // "both" (lexical + its own graph self-activation as a seed), not
+      // "semantic": the label says why the note is here at all, and text
+      // matching outranks meaning matching as an explanation.
+      expect(result.hits[0].source).toBe("both");
+      expect(result.hits[0].why.semanticScore).toBeCloseTo(1, 3);
+    });
+
+    it("ranks unchanged when no embedding index exists — the axis is optional", async () => {
+      await note("Kill Process By Port", "lsof and kill.");
+      await note("Gardening", "Tomatoes need water.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port");
+
+      expect(result.hits[0].path).toBe("Kill Process By Port");
+      expect(result.hits[0].why.semanticScore).toBeUndefined();
+    });
+
+    it("skips the phase entirely at semanticWeight 0 — no index read, no model call", async () => {
+      await note("Kill Process By Port", "lsof and kill.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const embeddingProvider = provider({ "kill process by port": [1, 0, 0] });
+      await buildEmbeddings(embeddingProvider, [{ id: "Kill Process By Port", body: "lsof and kill." }]);
+      embeddingProvider.calls.length = 0;
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", {
+        embeddingProvider,
+        semanticWeight: 0,
+      });
+
+      expect(embeddingProvider.calls).toHaveLength(0);
+      expect(result.hits[0].why.semanticScore).toBeUndefined();
+    });
+
+    it("ignores an index built by a different model rather than comparing incompatible vectors", async () => {
+      await note("Terminate A Listening Service", "How to stop whatever holds a socket open.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      await buildEmbeddings(provider({ "Terminate A Listening Service": [1, 0, 0] }, "old-model"), [
+        { id: "Terminate A Listening Service", body: "How to stop whatever holds a socket open." },
+      ]);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", {
+        embeddingProvider: provider({ "kill process by port": [1, 0, 0] }, "new-model"),
+      });
+
+      expect(result.hits.find((hit) => hit.path === "Terminate A Listening Service")).toBeUndefined();
+    });
+
+    it("keeps a strong text match above a merely-related semantic one", async () => {
+      await note("Kill Process By Port", "Use lsof to find the process listening on a port and kill it.");
+      await note("Docker Networking", "Container port mapping, unrelated to killing anything.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      // The distractor is semantically adjacent (same topic area) but the
+      // query's words are in the other note. Lexical must win: semanticWeight
+      // is below 1 precisely so a topical neighbour cannot displace a match.
+      const embeddingProvider = provider({
+        "kill process by port": [1, 0, 0],
+        "Docker Networking": [0.8, 0.6, 0],
+        "Kill Process By Port": [0.5, 0.5, 0.7],
+      });
+      await buildEmbeddings(embeddingProvider, [
+        { id: "Kill Process By Port", body: "Use lsof to find the process listening on a port and kill it." },
+        { id: "Docker Networking", body: "Container port mapping, unrelated to killing anything." },
+      ]);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", { embeddingProvider });
+
+      expect(result.hits[0].path).toBe("Kill Process By Port");
+    });
+
+    it("degrades to the pre-VNL-051 ranking when the model throws", async () => {
+      await note("Kill Process By Port", "lsof and kill.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const working = provider({ "Kill Process By Port": [1, 0, 0] });
+      await buildEmbeddings(working, [{ id: "Kill Process By Port", body: "lsof and kill." }]);
+
+      const broken: EmbeddingProvider = {
+        model: "test-model",
+        dim: 3,
+        async embed() {
+          throw new Error("onnxruntime exploded");
+        },
+      };
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", { embeddingProvider: broken });
+
+      expect(result.hits[0].path).toBe("Kill Process By Port");
+      expect(result.hits[0].why.semanticScore).toBeUndefined();
+    });
   });
 });

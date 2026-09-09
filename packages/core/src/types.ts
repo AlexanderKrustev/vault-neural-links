@@ -328,6 +328,32 @@ export interface ContentIndexFile {
 }
 
 /**
+ * VNL-051 — one semantic vector per note, written by the nightly job when
+ * the optional embedding model is installed. Absent for every vault that
+ * has not opted in, which is why every reader of it must treat null as a
+ * normal state rather than a missing dependency.
+ */
+export interface EmbeddingsFile {
+  version: number;
+  /**
+   * Model that produced these vectors. Two models' vector spaces are
+   * unrelated, so a stored vector is only ever reused or compared when this
+   * matches the live provider — a model change invalidates the whole file.
+   */
+  model: string;
+  /** Vector length (384 for all-MiniLM-L6-v2). 0 only in an index with no notes. */
+  dim: number;
+  builtAt: string;
+  /**
+   * Note path -> the hash of the text that was embedded (so an incremental
+   * rebuild can skip unchanged notes) and the L2-normalized vector, base64
+   * float32. Normalized on write so cosine similarity is a plain dot
+   * product at query time.
+   */
+  notes: Record<string, { hash: string; vector: string }>;
+}
+
+/**
  * Controls the retrieval fallback tier that treats a plain wikilink as
  * weak-but-real evidence of a relationship, so a note pair with no usage
  * history yet doesn't score identically to two unrelated notes. Only

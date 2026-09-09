@@ -36,7 +36,7 @@ export default class VaultNeuralLinksPlugin extends Plugin {
     // cluster pipeline (AIBRAIN-46) — no OS scheduled task, no Claude Code /
     // MCP-server-startup trigger. See NightlyScheduler for the idempotency
     // guarantee (delegated to core's file-marker-based runNightlyIfStale).
-    this.nightlyScheduler = new NightlyScheduler(this.app);
+    this.nightlyScheduler = new NightlyScheduler(this.app, () => this.settings.semanticIndex);
     this.nightlyScheduler.start();
 
     // VNL-052: the plugin is the engine's main sensor. Agent MCP traffic

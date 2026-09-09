@@ -38,6 +38,24 @@ export {
 } from "./sessionFiles.js";
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 export { buildContentIndex, loadContentIndex, rebuildContentIndex, candidatesFromIndex } from "./contentIndex.js";
+export {
+  DEFAULT_EMBEDDING_MODEL,
+  DEFAULT_EMBEDDING_NOTE_LIMIT,
+  EMBEDDINGS_FILE_NAME,
+  buildEmbeddingIndex,
+  cosine,
+  decodeVector,
+  embeddingHash,
+  embeddingText,
+  encodeVector,
+  getSharedEmbeddingProvider,
+  loadEmbeddings,
+  loadTransformersProvider,
+  rebuildEmbeddings,
+  semanticScores,
+  setSharedEmbeddingProvider,
+  type EmbeddingProvider,
+} from "./embeddings.js";
 export { tokenize } from "./tokenize.js";
 export {
   createObsidianAdapter,

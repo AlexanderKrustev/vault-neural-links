@@ -1,6 +1,13 @@
 import { compact } from "./compactor.js";
 import { buildStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 import { buildContentIndex, rebuildContentIndex } from "./contentIndex.js";
+import {
+  DEFAULT_EMBEDDING_NOTE_LIMIT,
+  getSharedEmbeddingProvider,
+  loadEmbeddings,
+  rebuildEmbeddings,
+  type EmbeddingProvider,
+} from "./embeddings.js";
 import { createObsidianAdapter } from "./adapters.js";
 import { runNightlyConsolidation } from "./consolidation.js";
 import { loadNoteImportance, runImportanceComputation } from "./importance.js";
@@ -16,6 +23,12 @@ export interface NightlyRunResult {
   noteCount?: number;
   clusterCount?: number;
   contentIndexTokenCount?: number;
+  /** Notes with a stored embedding after this run (VNL-051); absent when the semantic index is off. */
+  embeddedNoteCount?: number;
+  /** How many of those had to be (re-)embedded this run — 0 on a run where nothing changed. */
+  reembeddedCount?: number;
+  /** Model that produced them, so a mismatch is visible in the usage report. */
+  embeddingModel?: string;
   /** Stale per-instance session/socket files and expired logs removed (VNL-009). */
   prunedFileCount?: number;
   computedAt?: string;
@@ -34,12 +47,29 @@ export interface NightlyRunResult {
  * can't mask a stale run, and because it's a persisted file (not
  * in-memory plugin state) the gate survives Obsidian restarts/crashes too.
  */
+export interface NightlyEmbeddingOptions {
+  /**
+   * Tri-state on purpose. `true` builds the semantic index even if the
+   * vault has never had one (the opt-in), `false` never builds it, and the
+   * default — undefined — refreshes an index that already exists but never
+   * creates one. So a vault opts in once, from the plugin's settings or a
+   * one-off script, and every subsequent nightly run keeps it current
+   * without the caller having to remember the flag.
+   */
+  enabled?: boolean;
+  /** Injected in tests; defaults to the shared provider, which is null when the optional peer is absent. */
+  provider?: EmbeddingProvider | null;
+  /** Above this note count the index is skipped even when enabled (see DEFAULT_EMBEDDING_NOTE_LIMIT). */
+  noteLimit?: number;
+}
+
 export async function runNightlyIfStale(
   vaultPath: string,
   vaultDataDir: string,
   staleDays = 1,
   now: Date = new Date(),
   onEvent?: ActivationEventSink,
+  embeddingOptions: NightlyEmbeddingOptions = {},
 ): Promise<NightlyRunResult> {
   const existing = await loadNoteImportance(vaultDataDir);
   if (existing) {
@@ -61,6 +91,11 @@ export async function runNightlyIfStale(
   const contentIndex = await buildContentIndex(vaultPath, adapter, nodes);
   const contentIndexResult = await rebuildContentIndex(vaultPath, vaultDataDir, adapter, contentIndex);
 
+  // VNL-051: reuses the same `nodes` pass as the two indexes above, and
+  // re-embeds only notes whose text changed since the last run — a full
+  // vault embed is minutes of CPU, an unchanged one is a hash comparison.
+  const embeddings = await runEmbeddingRefresh(vaultDataDir, nodes, embeddingOptions, now);
+
   const importance = await runImportanceComputation(vaultDataDir, undefined, now);
   const clustering = await runClusterComputation(vaultDataDir, undefined, now);
 
@@ -77,7 +112,50 @@ export async function runNightlyIfStale(
     noteCount: importance.noteCount,
     clusterCount: clustering.clusterCount,
     contentIndexTokenCount: contentIndexResult.tokenCount,
+    ...embeddings,
     prunedFileCount: Object.values(prune.removed).reduce((sum, n) => sum + n, 0),
     computedAt: importance.computedAt,
   };
+}
+
+/**
+ * The semantic half of the nightly pipeline (VNL-051). Returns the fields
+ * to merge into `NightlyRunResult`, or an empty object when the index is
+ * off, unavailable, or the vault is too large for a scan-per-query index.
+ *
+ * Nothing in here is allowed to fail the nightly run: embeddings are an
+ * optional retrieval axis, and a missing model or a full disk must not cost
+ * the vault its compaction, indexes and importance scores. The failure is
+ * silent in the same way the absent package is — the plugin's usage report
+ * shows the note count, so "it stopped updating" is visible where a user
+ * would look for it.
+ */
+async function runEmbeddingRefresh(
+  vaultDataDir: string,
+  nodes: Awaited<ReturnType<ReturnType<typeof createObsidianAdapter>["listNodes"]>>,
+  options: NightlyEmbeddingOptions,
+  now: Date,
+): Promise<Pick<NightlyRunResult, "embeddedNoteCount" | "reembeddedCount" | "embeddingModel">> {
+  if (options.enabled === false) return {};
+
+  const existing = await loadEmbeddings(vaultDataDir);
+  // The default is "refresh what exists, never create" — see the tri-state
+  // note on NightlyEmbeddingOptions.enabled.
+  if (!existing && options.enabled !== true) return {};
+
+  if (nodes.length > (options.noteLimit ?? DEFAULT_EMBEDDING_NOTE_LIMIT)) return {};
+
+  const provider = options.provider ?? (await getSharedEmbeddingProvider());
+  if (!provider) return {};
+
+  try {
+    const result = await rebuildEmbeddings(vaultDataDir, nodes, provider, { existing, now });
+    return {
+      embeddedNoteCount: result.noteCount,
+      reembeddedCount: result.embeddedCount,
+      embeddingModel: result.model,
+    };
+  } catch {
+    return {};
+  }
 }

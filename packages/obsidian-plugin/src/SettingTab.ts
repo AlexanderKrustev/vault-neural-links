@@ -43,6 +43,25 @@ export class VaultNeuralLinksSettingTab extends PluginSettingTab {
         }),
       );
 
+    // VNL-051. Two things the user has to know before turning this on: it
+    // needs a package they install themselves, and the first build reaches
+    // the network once to fetch the model. Everything after that is local.
+    new Setting(containerEl)
+      .setName("Match meaning, not just words (semantic index)")
+      .setDesc(
+        "Let retrieval find notes that mean the same thing as a query even when they share no " +
+          "words with it. Requires the optional @huggingface/transformers package; the first " +
+          "build downloads a ~23 MB model once, and everything after that runs offline on this " +
+          "machine. The index is built by the nightly job and stored in .vault-neural-links/ — " +
+          "note text is never sent anywhere.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.semanticIndex).onChange((value) => {
+          this.plugin.settings.semanticIndex = value;
+          void this.plugin.saveSettings();
+        }),
+      );
+
     new Setting(containerEl)
       .setName("Minimum edge weight")
       .setDesc(

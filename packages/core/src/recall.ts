@@ -1,12 +1,25 @@
 import { stat } from "node:fs/promises";
 import { activate } from "./activation.js";
 import { candidatesFromIndex, loadContentIndex } from "./contentIndex.js";
+import {
+  DEFAULT_SEMANTIC_CANDIDATES,
+  DEFAULT_SEMANTIC_FLOOR,
+  getSharedEmbeddingProvider,
+  loadEmbeddings,
+  semanticScores,
+  type EmbeddingProvider,
+} from "./embeddings.js";
 import { listNotes, readNotesInBatches, searchNotes, toFilePath, type NoteRef } from "./notes.js";
 import type { SessionBuffer } from "./priming.js";
 import { readSupersession } from "./relations.js";
 import { liveTermScores } from "./termWeights.js";
 import { tokenize } from "./tokenize.js";
-import type { ActivationEventSink, ContentIndexFile, SpreadingActivationConfig } from "./types.js";
+import type {
+  ActivationEventSink,
+  ContentIndexFile,
+  EmbeddingsFile,
+  SpreadingActivationConfig,
+} from "./types.js";
 import { DEFAULT_SPREADING_ACTIVATION_CONFIG } from "./types.js";
 
 /**
@@ -46,6 +59,18 @@ const DEFAULT_GRAPH_WEIGHT = 0.5;
  * not a measurement; VNL-020 is where it gets earned.
  */
 const DEFAULT_TERM_WEIGHT = 0.4;
+/**
+ * Weight of the (normalized) semantic score in the same additive blend
+ * (VNL-051). Higher than the graph and term axes because, unlike them, this
+ * is an actual relevance model rather than a usage signal — it can be
+ * trusted on a query it has never seen, which is the whole reason for
+ * adding it. Still below 1: BM25 on an exact term match is the more
+ * precise signal when it fires at all, and a 384-dimension sentence
+ * embedding of a note's opening 1200 characters is a lossy summary that
+ * happily calls two different project notes similar. Unmeasured opening
+ * position; VNL-020 sweeps it.
+ */
+const DEFAULT_SEMANTIC_WEIGHT = 0.6;
 /** Wall-clock bound on the whole graph-expansion phase (all seeds together). */
 const DEFAULT_GRAPH_BUDGET_MS = 1000;
 /** Characters of body returned per hit so the agent needn't call read_note to triage. */
@@ -119,6 +144,15 @@ export interface RecallWhy {
   termScore?: number;
   /** Which query terms contributed to `termScore`, strongest first. */
   learnedTerms?: string[];
+  /**
+   * Cosine similarity between the query's embedding and this note's, in
+   * [0,1] (VNL-051) — set only when the optional embedding index exists and
+   * this note cleared the similarity floor. Unlike every other axis here it
+   * is comparable across queries, so it is the one number in `why` worth
+   * reading on its own: ~0.8 is a paraphrase, ~0.5 is the same topic, and
+   * anything the floor let through below that is a weak association.
+   */
+  semanticScore?: number;
 }
 
 export interface RecallHit {
@@ -129,8 +163,15 @@ export interface RecallHit {
    * Which signal produced this hit. "term" means the note surfaced purely
    * because this user's own history associates a query term with it — no
    * text in the note matches today and the graph didn't reach it either.
+   * "semantic" means it matched on meaning alone (VNL-051): no query term
+   * occurs in it, but its embedding is close to the query's.
+   *
+   * Reported strongest-evidence-first, so a note that both matched text and
+   * was reached semantically reads as "lexical", not "semantic" — the label
+   * answers "why is this here at all", and `why` carries every axis'
+   * individual score for a caller that needs the full picture.
    */
-  source: "lexical" | "graph" | "both" | "term";
+  source: "lexical" | "graph" | "both" | "semantic" | "term";
   /** Leading body text (around the first matched term), so triage needs no read_note round trip. */
   snippet: string;
   why: RecallWhy;
@@ -152,6 +193,32 @@ export interface RecallOptions {
   graphWeight?: number;
   /** Weight of learned query-term associations in the blend (VNL-053, default 0.4). */
   termWeight?: number;
+  /**
+   * Weight of the semantic axis in the blend (VNL-051, default 0.6). Set to
+   * 0 to skip the semantic phase entirely — no index read, no model load.
+   */
+  semanticWeight?: number;
+  /**
+   * Cosine floor a note must clear to count as a semantic match at all
+   * (default 0.35). Below it, unrelated prose scores as a match.
+   */
+  semanticFloor?: number;
+  /** How many semantic hits may enter the blend (default 20). */
+  semanticCandidates?: number;
+  /**
+   * The embedding index to score against. Omitted, it is loaded from
+   * `vaultDataDir` — absent file means the vault never opted in and the
+   * semantic phase is skipped. Pass `false` to skip it explicitly, or an
+   * index directly to avoid the per-call read (a benchmark sweeping
+   * weights, say).
+   */
+  embeddings?: EmbeddingsFile | null | false;
+  /**
+   * Model used to embed the *query*. Defaults to the process-wide shared
+   * provider, which is null unless the optional `@huggingface/transformers`
+   * peer is installed.
+   */
+  embeddingProvider?: EmbeddingProvider | null;
   /** Wall-clock bound for the graph phase; lexical scoring always completes. */
   budgetMs?: number;
   activationConfig?: SpreadingActivationConfig;
@@ -350,6 +417,60 @@ async function staleDays(vaultPath: string, notePath: string, now: Date): Promis
  * a `why` (matched terms, hop path, energy, staleness, supersession) so the
  * agent can triage without N `read_note` round trips.
  */
+interface SemanticPhaseOptions {
+  semanticWeight: number;
+  semanticFloor: number;
+  semanticCandidates: number;
+  embeddings?: EmbeddingsFile | null | false;
+  embeddingProvider?: EmbeddingProvider | null;
+}
+
+/**
+ * Cosine similarity of the query against the stored note vectors, or an
+ * empty map when the semantic axis isn't available (VNL-051).
+ *
+ * Every reason to have no answer is a normal state, not a failure: the
+ * feature is off by default, the optional model may not be installed, and
+ * an index built by a different model must be ignored rather than compared
+ * against — two models' vector spaces are unrelated, so cosine between them
+ * is a meaningless number that would still sort. Anything the model itself
+ * throws is swallowed for the same reason it is optional: a broken ONNX
+ * runtime must degrade `recall` to its pre-VNL-051 behaviour, never fail
+ * the query.
+ *
+ * Only the query text is embedded, not `context`. Context terms exist to
+ * break ties between otherwise-equal lexical matches at CONTEXT_TERM_WEIGHT;
+ * concatenating them into the embedded text has no equivalent volume knob —
+ * a paragraph of context would simply become the query, and the vector
+ * would describe the caller's situation rather than their question.
+ */
+async function semanticPhase(
+  vaultDataDir: string,
+  query: string,
+  opts: SemanticPhaseOptions,
+): Promise<Map<string, number>> {
+  const empty = new Map<string, number>();
+  if (opts.semanticWeight <= 0 || opts.embeddings === false) return empty;
+
+  try {
+    const index = opts.embeddings ?? (await loadEmbeddings(vaultDataDir));
+    if (!index || Object.keys(index.notes).length === 0) return empty;
+
+    const provider = opts.embeddingProvider ?? (await getSharedEmbeddingProvider());
+    if (!provider || provider.model !== index.model) return empty;
+
+    const [queryVector] = await provider.embed([query]);
+    if (!queryVector) return empty;
+
+    return semanticScores(index, queryVector, {
+      floor: opts.semanticFloor,
+      topN: opts.semanticCandidates,
+    });
+  } catch {
+    return empty;
+  }
+}
+
 export async function recall(
   vaultPath: string,
   vaultDataDir: string,
@@ -365,6 +486,11 @@ export async function recall(
     seedEnergy = DEFAULT_SEED_ENERGY,
     graphWeight = DEFAULT_GRAPH_WEIGHT,
     termWeight = DEFAULT_TERM_WEIGHT,
+    semanticWeight = DEFAULT_SEMANTIC_WEIGHT,
+    semanticFloor = DEFAULT_SEMANTIC_FLOOR,
+    semanticCandidates = DEFAULT_SEMANTIC_CANDIDATES,
+    embeddings,
+    embeddingProvider,
     budgetMs = DEFAULT_GRAPH_BUDGET_MS,
     activationConfig = DEFAULT_SPREADING_ACTIVATION_CONFIG,
     onEvent,
@@ -426,6 +552,24 @@ export async function recall(
     scoringTerms.map((term) => term.token),
     now,
   );
+
+  // --- Semantic phase (VNL-051) --------------------------------------------
+  // What the query *means*, independent of which words it used. This is the
+  // only phase that can reach a note sharing no vocabulary with the query at
+  // all, so it runs over the whole embedding index rather than over the
+  // lexical candidate set — narrowing it to notes BM25 already found would
+  // defeat the point.
+  //
+  // Entirely optional: the index only exists if the vault opted in and the
+  // nightly job built it, and embedding the query needs the optional model.
+  // Either missing means "no semantic axis", not an error.
+  const semantic = await semanticPhase(vaultDataDir, query, {
+    semanticWeight,
+    semanticFloor,
+    semanticCandidates,
+    embeddings,
+    embeddingProvider,
+  });
 
   // --- Graph phase ---------------------------------------------------------
   const seeds = scored.slice(0, seedCount);
@@ -503,24 +647,46 @@ export async function recall(
   const maxTermScore = Math.max(0, ...[...termScores.values()].map((t) => t.score));
 
   const byPath = new Map<string, ScoredNote>(scored.map((entry) => [entry.note.path, entry]));
-  const allPaths = new Set<string>([...byPath.keys(), ...graph.keys(), ...termScores.keys()]);
+  const allPaths = new Set<string>([
+    ...byPath.keys(),
+    ...graph.keys(),
+    ...termScores.keys(),
+    ...semantic.keys(),
+  ]);
 
   const ranked = [...allPaths]
     .map((path) => {
       const lexical = byPath.get(path);
       const graphHit = graph.get(path);
       const termHit = termScores.get(path);
+      const semanticHit = semantic.get(path);
       const lexicalNorm = lexical && maxLexical > 0 ? lexical.score / maxLexical : 0;
       const graphNorm = graphHit && maxEnergy > 0 ? graphHit.energy / maxEnergy : 0;
       const termNorm = termHit && maxTermScore > 0 ? termHit.score / maxTermScore : 0;
+      // Not normalized against the best value in this result set, unlike
+      // every other axis: cosine is already a bounded, cross-query
+      // comparable [0,1]. Normalizing it would promote the best of a set of
+      // uniformly poor semantic matches to a full-strength signal, which is
+      // exactly what a floor-plus-absolute-score axis is meant to prevent.
+      const semanticNorm = semanticHit ?? 0;
       const source: RecallHit["source"] =
-        lexical && graphHit ? "both" : lexical ? "lexical" : graphHit ? "graph" : "term";
+        lexical && graphHit
+          ? "both"
+          : lexical
+            ? "lexical"
+            : graphHit
+              ? "graph"
+              : semanticHit !== undefined
+                ? "semantic"
+                : "term";
       return {
         path,
         lexical,
         graphHit,
         termHit,
-        score: lexicalNorm + graphWeight * graphNorm + termWeight * termNorm,
+        semanticHit,
+        score:
+          lexicalNorm + graphWeight * graphNorm + termWeight * termNorm + semanticWeight * semanticNorm,
         source,
       };
     })
@@ -544,6 +710,7 @@ export async function recall(
         lexicalScore: entry.lexical?.score ?? 0,
         ...(entry.graphHit && { graphEnergy: entry.graphHit.energy, via: entry.graphHit.via, hops: entry.graphHit.hops }),
         ...(entry.termHit && { termScore: entry.termHit.score, learnedTerms: entry.termHit.terms }),
+        ...(entry.semanticHit !== undefined && { semanticScore: entry.semanticHit }),
         ...(sessionBuffer?.has(entry.path) && { primed: true }),
       };
 

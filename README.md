@@ -54,6 +54,18 @@ now, not just what's technically connected.
   your own vault. No note content, no network calls, nothing sent anywhere,
   no telemetry. Turn it off in the plugin's settings ("Learn from my
   navigation"), or delete the folder to erase it.
+- **Optional: matches meaning, not just words** — off by default. With the
+  optional `@huggingface/transformers` package installed, the nightly job
+  embeds each note locally (all-MiniLM-L6-v2, ONNX, CPU) and `recall` blends
+  that similarity in, so a note that shares no word with your query but says
+  the same thing can still surface — with a `semanticScore` on the hit
+  saying how close it was. **The one network call in this project:** the
+  first build downloads the ~23 MB model from HuggingFace's CDN, once;
+  everything after that is offline. Your note text is never sent anywhere —
+  the model runs on your machine and the vectors are stored in
+  `.vault-neural-links/embeddings.json`. Enable it in the plugin's settings
+  ("Match meaning, not just words"). No quality claim is attached to this
+  yet: it is measured by VNL-020's benchmark, not asserted here.
 - **Plain-text audit trail** — every write appends a human-readable line to
   `changes.jsonl`. No git dependency — your vault doesn't need to be a git
   repo for any of this to work.
@@ -128,7 +140,7 @@ ribbon icon or the "Open Neural Graph" command.
 
 | Tool | Purpose |
 |---|---|
-| `recall` | **Start here.** Answers a query, not a note path: BM25 relevance picks the matching notes, spreading activation over the weighted graph expands and re-ranks them, learned term↔note associations from your own past searches can surface a note even with no text match today, and every hit comes back with a snippet and a `why` (matched terms, seed note and hop count, activation energy, learned-term score, staleness, supersession). Reading a result teaches it what your words mean, going forward. |
+| `recall` | **Start here.** Answers a query, not a note path: BM25 relevance picks the matching notes, spreading activation over the weighted graph expands and re-ranks them, learned term↔note associations from your own past searches can surface a note even with no text match today, and every hit comes back with a snippet and a `why` (matched terms, seed note and hop count, activation energy, learned-term score, staleness, supersession), plus a `semanticScore` when the optional local embedding index is enabled. Reading a result teaches it what your words mean, going forward. |
 | `create_note` | Create a note (frontmatter + body); auto-links it and logs the change |
 | `update_note` | Replace a note's body, or append text under a heading (e.g. `## Updates`) |
 | `read_note` | Read a note's parsed frontmatter and body |

@@ -28,7 +28,15 @@ export class NightlyScheduler {
   private startupTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   private running = false;
 
-  constructor(private readonly app: App) {}
+  /**
+   * `semanticIndexEnabled` is read per tick rather than captured once, so
+   * toggling the setting takes effect on the next run instead of at the
+   * next Obsidian reload.
+   */
+  constructor(
+    private readonly app: App,
+    private readonly semanticIndexEnabled: () => boolean = () => false,
+  ) {}
 
   start(): void {
     this.startupTimeoutHandle = setTimeout(() => void this.tick(), STARTUP_DELAY_MS);
@@ -56,12 +64,26 @@ export class NightlyScheduler {
     try {
       const vaultPath = adapter.getBasePath();
       const vaultDataDir = resolveDataDir(vaultPath);
-      const result: NightlyRunResult = await runNightlyIfStale(vaultPath, vaultDataDir);
+      const result: NightlyRunResult = await runNightlyIfStale(
+        vaultPath,
+        vaultDataDir,
+        undefined,
+        undefined,
+        undefined,
+        // VNL-051: `true` creates the semantic index, undefined only
+        // refreshes one that already exists — so switching the setting off
+        // stops it being rebuilt without deleting what is there, and
+        // switching it on is the opt-in.
+        { enabled: this.semanticIndexEnabled() || undefined },
+      );
       if (result.ran) {
         console.log(
           `vault-neural-links: nightly pipeline ran — ${result.edgeCount} edges, ` +
             `${result.promotedCount} promoted, ${result.noteCount} notes scored, ` +
-            `${result.clusterCount} clusters, at ${result.computedAt}`,
+            `${result.clusterCount} clusters, at ${result.computedAt}` +
+            (result.embeddedNoteCount === undefined
+              ? ""
+              : `, ${result.embeddedNoteCount} embedded (${result.reembeddedCount} refreshed)`),
         );
       }
     } catch (err) {
