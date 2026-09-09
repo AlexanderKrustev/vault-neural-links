@@ -270,6 +270,138 @@ describe("recall", () => {
     expect(result.hits.map((hit) => hit.path)).toContain("Sibling Note");
   });
 
+  // --- VNL-056: staleness and supersession conflicts -----------------------
+  describe("staleness and conflicts", () => {
+    it("reports days since the note was last used, from the usage graph not the file", async () => {
+      await note("Used Long Ago", "spreading activation write-up");
+      await note("Neighbour", "linked note");
+      await appendEvent(dataDir, "inst-1", {
+        ts: new Date(Date.now() - 120 * 86_400_000).toISOString(),
+        instance: "inst-1",
+        type: "traverse",
+        from: "Used Long Ago",
+        to: "Neighbour",
+        weight_delta: 10,
+      });
+      await compact(dataDir);
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const result = await recall(vaultPath, dataDir, "spreading activation write-up");
+      const hit = result.hits.find((entry) => entry.path === "Used Long Ago");
+
+      expect(hit?.why.unusedDays).toBeGreaterThanOrEqual(119);
+      // The file was written seconds ago; only the usage graph knows it has
+      // not been read in four months. That gap is the whole point.
+      expect(hit?.why.staleDays).toBe(0);
+      expect(hit?.why.warnings?.join(" ")).toContain("Not used in");
+      expect(hit?.why.warnings?.join(" ")).toContain("edited recently but not read since");
+    });
+
+    it("stays quiet about a note that has simply never been used", async () => {
+      await note("Never Used", "spreading activation write-up");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const result = await recall(vaultPath, dataDir, "spreading activation write-up");
+      const hit = result.hits.find((entry) => entry.path === "Never Used");
+
+      // "Never used" and "unused for 200 days" are different states; treating
+      // them alike would warn on every note in a young vault.
+      expect(hit?.why.unusedDays).toBeUndefined();
+      expect(hit?.why.warnings).toBeUndefined();
+    });
+
+    it("pulls in the successor of a superseded hit, without demoting the original", async () => {
+      await note("Old Decision", "charge from day one, spreading activation write-up", {
+        status: "superseded",
+        superseded_by: "[[New Decision]]",
+      });
+      await note("New Decision", "free first, then paid");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const result = await recall(vaultPath, dataDir, "spreading activation write-up");
+
+      const old = result.hits.find((entry) => entry.path === "Old Decision");
+      expect(old).toBeDefined();
+      expect(old!.why.warnings?.join(" ")).toContain("Superseded by");
+
+      const successor = result.hits.find((entry) => entry.path === "New Decision");
+      expect(successor).toBeDefined();
+      expect(successor!.source).toBe("successor");
+      expect(successor!.why.supersedes).toBe("Old Decision");
+      // Not demoted: the earlier decision is often exactly what was asked for.
+      expect(result.hits[0].path).toBe("Old Decision");
+    });
+
+    it("does not duplicate a successor that already ranked on its own", async () => {
+      await note("Old Decision", "spreading activation write-up, superseded", {
+        status: "superseded",
+        superseded_by: "[[New Decision]]",
+      });
+      await note("New Decision", "spreading activation write-up, current");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const result = await recall(vaultPath, dataDir, "spreading activation write-up");
+
+      expect(result.hits.filter((entry) => entry.path === "New Decision")).toHaveLength(1);
+    });
+
+    it("flags a supersession pointing at a note that does not exist", async () => {
+      await note("Orphaned", "spreading activation write-up", {
+        status: "superseded",
+        superseded_by: "[[Note That Was Deleted]]",
+      });
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const result = await recall(vaultPath, dataDir, "spreading activation write-up");
+      const hit = result.hits.find((entry) => entry.path === "Orphaned");
+
+      expect(hit?.why.warnings?.join(" ")).toContain("dangling");
+      // Nothing is invented to stand in for the missing note.
+      expect(result.hits.some((entry) => entry.source === "successor")).toBe(false);
+    });
+
+    it("says so when the outdated note outranks the one that replaced it", async () => {
+      await note("Old Decision", "spreading activation write-up spreading activation", {
+        status: "superseded",
+        superseded_by: "[[New Decision]]",
+      });
+      await note("New Decision", "spreading activation");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const result = await recall(vaultPath, dataDir, "spreading activation write-up");
+      const old = result.hits.find((entry) => entry.path === "Old Decision");
+
+      expect(old!.why.warnings?.join(" ")).toContain("ranks above the note that replaced it");
+    });
+
+    it("does not call a note stale when it was read this session", async () => {
+      await note("Read Today", "spreading activation write-up");
+      await note("Neighbour", "linked");
+      await appendEvent(dataDir, "inst-1", {
+        ts: new Date(Date.now() - 200 * 86_400_000).toISOString(),
+        instance: "inst-1",
+        type: "traverse",
+        from: "Read Today",
+        to: "Neighbour",
+        weight_delta: 10,
+      });
+      await compact(dataDir);
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const buffer = new SessionBuffer();
+      buffer.touch("Read Today");
+      const result = await recall(vaultPath, dataDir, "spreading activation write-up", {
+        sessionBuffer: buffer,
+      });
+      const hit = result.hits.find((entry) => entry.path === "Read Today");
+
+      // Usage weights only move at compaction, so the graph still thinks this
+      // is 200 days cold; the session buffer knows better.
+      expect(hit?.why.unusedDays).toBeGreaterThan(190);
+      expect(hit?.why.warnings ?? []).toEqual([]);
+    });
+  });
+
   // --- VNL-051: the semantic axis ------------------------------------------
   // A fake provider throughout: these assert the blend, not the model. What
   // "means the same thing" means is declared by the test, so the ranking

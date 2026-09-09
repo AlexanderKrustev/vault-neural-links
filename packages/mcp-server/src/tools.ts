@@ -127,9 +127,15 @@ export const recallTool = {
       "the query but says the same thing can surface on its own. Each hit comes back with a snippet and a " +
       "`why` (matched terms, the seed note and hop count the graph reached it through, activation " +
       "energy, any learned term association and its score, `semanticScore` when the embedding " +
-      "index is in use, days since the file changed, and " +
+      "index is in use, days since the file changed, days since anything last *used* the note, and " +
       "`supersededBy` when the note is marked outdated), so results can be triaged without a " +
-      "read_note call each. Reading a result afterward also teaches the engine what this query's " +
+      "read_note call each. Hits that need care carry plain-language `warnings`: a note nobody has " +
+      "opened in months, a note whose file changed recently but which has not been read since, one " +
+      "marked superseded (whose replacement is then included in the results as source " +
+      "`\"successor\"`, so you never have to search for it), and one whose supersession points at a " +
+      "note that no longer exists. Superseded notes are flagged, never hidden — the earlier " +
+      "decision is often what was actually being asked about. " +
+      "Reading a result afterward also teaches the engine what this query's " +
       "words mean for you, going forward. Use search_notes instead only when you want a literal " +
       "text match with no graph involvement, and get_weighted_neighbors / activate when your " +
       "starting point genuinely is a specific note.",

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { StructuralLinksFile } from "./types.js";
 import { createObsidianAdapter, type SourceAdapter, type SourceNode } from "./adapters.js";
+import { createNoteResolver } from "./noteResolver.js";
 
 const STRUCTURAL_LINKS_FILE_VERSION = 1;
 const STRUCTURAL_LINKS_FILE_NAME = "structural-links.json";
@@ -27,23 +28,8 @@ export async function buildStructuralIndex(
   // real, previously-measured cost (~17s, AIBRAIN-131), not a rounding error.
   const nodes = prebuiltNodes ?? (await adapter.listNodes());
 
-  const byPathLower = new Map<string, string>();
-  const byTitleLower = new Map<string, string[]>();
-  for (const node of nodes) {
-    byPathLower.set(node.id.toLowerCase(), node.id);
-    const title = (node.id.split("/").pop() ?? node.id).toLowerCase();
-    byTitleLower.set(title, [...(byTitleLower.get(title) ?? []), node.id]);
-  }
-
-  function resolveTarget(target: string): string | undefined {
-    const norm = target.toLowerCase();
-    const exact = byPathLower.get(norm);
-    if (exact) return exact;
-
-    const titleKey = norm.split("/").pop() ?? norm;
-    const titleMatches = byTitleLower.get(titleKey);
-    return titleMatches?.length === 1 ? titleMatches[0] : undefined;
-  }
+  const resolver = createNoteResolver(nodes.map((node) => node.id));
+  const resolveTarget = (target: string): string | undefined => resolver.resolve(target);
 
   const adjacency = new Map<string, Set<string>>();
   function addEdge(a: string, b: string): void {

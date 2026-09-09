@@ -49,6 +49,7 @@ export {
   type BriefingOptions,
 } from "./briefing.js";
 export { branchTokens, detectGitBranch } from "./gitBranch.js";
+export { createNoteResolver, type NoteResolver } from "./noteResolver.js";
 export {
   BENCHMARK_CONDITIONS,
   DEFAULT_BENCHMARK_TOP_K,

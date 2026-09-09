@@ -1,4 +1,5 @@
 import { extractWikilinks } from "./parser.js";
+import { createNoteResolver } from "./noteResolver.js";
 
 /**
  * VNL-054 — the deterministic, MCP-visible half of AIBRAIN-134's *Referenced*
@@ -25,27 +26,18 @@ import { extractWikilinks } from "./parser.js";
  * job (structuralLinks.ts) and gets no usage weight from a write.
  */
 export function citedNotes(writtenPath: string, agentText: string, readThisSession: Iterable<string>): string[] {
-  const byPathLower = new Map<string, string>();
-  const byTitleLower = new Map<string, string[]>();
-  for (const path of readThisSession) {
-    byPathLower.set(path.toLowerCase(), path);
-    const title = (path.split("/").pop() ?? path).toLowerCase();
-    byTitleLower.set(title, [...(byTitleLower.get(title) ?? []), path]);
-  }
-  if (byPathLower.size === 0) return [];
+  // Bare `[[Title]]` is how this vault writes most of its links, so a title
+  // match has to be supported — but only when it is unambiguous, the same
+  // discipline buildStructuralIndex applies. Two notes read this session that
+  // share a filename (this vault has ~20 notes titled "Index") make the
+  // citation unattributable, and a wrong attribution is worse than none.
+  const resolver = createNoteResolver(readThisSession);
+  if (resolver.size === 0) return [];
 
   const cited: string[] = [];
   const seen = new Set<string>();
   for (const link of extractWikilinks(agentText)) {
-    const norm = link.target.toLowerCase();
-    const exact = byPathLower.get(norm);
-    // Bare `[[Title]]` is how this vault writes most of its links, so a title
-    // match has to be supported — but only when it is unambiguous, the same
-    // discipline buildStructuralIndex applies. Two notes read this session
-    // that share a filename (this vault has ~20 notes titled "Index") make the
-    // citation unattributable, and a wrong attribution is worse than none.
-    const titleMatches = byTitleLower.get(norm.split("/").pop() ?? norm);
-    const resolved = exact ?? (titleMatches?.length === 1 ? titleMatches[0] : undefined);
+    const resolved = resolver.resolve(link.target);
 
     // A note citing itself is not evidence of a relationship between two
     // notes, and self-edges are meaningless to spreading activation.

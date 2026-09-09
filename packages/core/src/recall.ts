@@ -12,6 +12,8 @@ import {
 } from "./embeddings.js";
 import { listNotes, readNotesInBatches, searchNotes, toFilePath, type NoteRef } from "./notes.js";
 import type { SessionBuffer } from "./priming.js";
+import { createNoteResolver } from "./noteResolver.js";
+import { loadWeights } from "./query.js";
 import { readSupersession } from "./relations.js";
 import { liveTermScores } from "./termWeights.js";
 import { tokenize } from "./tokenize.js";
@@ -19,6 +21,7 @@ import type {
   ActivationEventSink,
   ContentIndexFile,
   EmbeddingsFile,
+  LinkWeightsFile,
   SpreadingActivationConfig,
 } from "./types.js";
 import { DEFAULT_SPREADING_ACTIVATION_CONFIG } from "./types.js";
@@ -140,8 +143,36 @@ export interface RecallWhy {
   via?: string;
   /** Hops from `via` to this note (1 = direct neighbor). */
   hops?: number;
-  /** Days since the note's file was last modified — VNL-056 will surface this in prose. */
+  /** Days since the note's file was last modified. */
   staleDays?: number;
+  /**
+   * Days since anything last *used* this note — the most recent `lastTouched`
+   * across its usage edges (VNL-056). A different question from `staleDays`,
+   * and often the more useful one: a note edited yesterday but unopened since
+   * March is stale in a way a file timestamp cannot show, and one untouched
+   * on disk for a year but read weekly is not stale at all.
+   *
+   * Absent when the note has no usage history at all, which is not the same
+   * as "unused for a long time" and must not be reported as if it were. A
+   * note used earlier in *this* session may still show a stale value here,
+   * since usage weights only move at compaction — `primed` is what says the
+   * session has already seen it.
+   */
+  unusedDays?: number;
+  /**
+   * Plain-language warnings about this hit: staleness worth noticing,
+   * supersession, and conflicts between the two (VNL-056). Prose rather than
+   * flags because the consumer is a language model deciding whether to trust
+   * a note, and `staleDays: 94` obliges it to re-derive what that means on
+   * every call.
+   */
+  warnings?: string[];
+  /**
+   * Set on a note pulled into the results because it supersedes one that
+   * ranked — names the note it replaced. The successor is never itself
+   * demoted or promoted; it is only guaranteed to be present.
+   */
+  supersedes?: string;
   /** Set when the note's frontmatter marks it `status: superseded` (see relations.ts). */
   supersededBy?: string;
   /** True if this note is in the session buffer, i.e. already seen this session. */
@@ -174,14 +205,17 @@ export interface RecallHit {
    * because this user's own history associates a query term with it — no
    * text in the note matches today and the graph didn't reach it either.
    * "semantic" means it matched on meaning alone (VNL-051): no query term
-   * occurs in it, but its embedding is close to the query's.
+   * occurs in it, but its embedding is close to the query's. "successor"
+   * means it did not match the query at all and is here only because it
+   * supersedes a note that did (VNL-056) — being told a result is outdated
+   * is not much use without the thing that replaced it.
    *
    * Reported strongest-evidence-first, so a note that both matched text and
    * was reached semantically reads as "lexical", not "semantic" — the label
    * answers "why is this here at all", and `why` carries every axis'
    * individual score for a caller that needs the full picture.
    */
-  source: "lexical" | "graph" | "both" | "semantic" | "term";
+  source: "lexical" | "graph" | "both" | "semantic" | "term" | "successor";
   /** Leading body text (around the first matched term), so triage needs no read_note round trip. */
   snippet: string;
   why: RecallWhy;
@@ -419,6 +453,82 @@ function snippetFor(body: string, matchedTerms: string[]): string {
   const start = Math.max(0, at - Math.floor(SNIPPET_LENGTH / 3));
   const end = Math.min(collapsed.length, start + SNIPPET_LENGTH);
   return `${start > 0 ? "…" : ""}${collapsed.slice(start, end)}${end < collapsed.length ? "…" : ""}`;
+}
+
+/**
+ * Days a note has to go unused before it is worth mentioning. Below this a
+ * warning is noise: most notes in an active project are untouched for a few
+ * weeks at a time and nothing is wrong with them.
+ */
+const UNUSED_WARNING_DAYS = 90;
+
+/**
+ * Days since anything last used this note, from the usage graph rather than
+ * the filesystem (VNL-056) — the decay layer's one clearly useful output at
+ * today's data volume, per the Phase 2b row.
+ *
+ * Returns undefined when the note has no usage edges at all. "Never used" and
+ * "unused for 200 days" are different states and conflating them would put a
+ * staleness warning on every note in a young vault.
+ */
+function unusedDaysFrom(weights: LinkWeightsFile | null, notePath: string, now: Date): number | undefined {
+  if (!weights) return undefined;
+
+  let latest: number | undefined;
+  for (const [key, edge] of Object.entries(weights.edges)) {
+    if (!key.split("|").includes(notePath)) continue;
+    const touched = new Date(edge.lastTouched).getTime();
+    if (Number.isNaN(touched)) continue;
+    if (latest === undefined || touched > latest) latest = touched;
+  }
+  if (latest === undefined) return undefined;
+  return Math.max(0, Math.floor((now.getTime() - latest) / 86_400_000));
+}
+
+/**
+ * The prose a hit carries about its own reliability (VNL-056).
+ *
+ * Ordered most-actionable-first, because a model reading a list of warnings
+ * acts on the first one: supersession outranks staleness, since a superseded
+ * note is wrong rather than merely old.
+ */
+function warningsFor(input: {
+  supersededBy?: string;
+  successorResolved: boolean;
+  successorRankedAbove?: boolean;
+  unusedDays?: number;
+  staleDays?: number;
+  primed?: boolean;
+}): string[] {
+  const warnings: string[] = [];
+
+  if (input.supersededBy) {
+    warnings.push(
+      input.successorResolved
+        ? `Superseded by ${input.supersededBy} — prefer that note unless you specifically want the earlier decision.`
+        : `Marked superseded by "${input.supersededBy}", which is not a note in this vault — the ` +
+          `supersession is dangling and one of the two is wrong.`,
+    );
+    if (input.successorRankedAbove === false) {
+      warnings.push(
+        `This outdated note ranks above the note that replaced it, so the ordering here does not ` +
+          `reflect which one is current.`,
+      );
+    }
+  }
+
+  // Only when the note has usage history: silence is "never used", which is
+  // an ordinary state for most of a vault and not worth a warning.
+  if (input.unusedDays !== undefined && input.unusedDays >= UNUSED_WARNING_DAYS && !input.primed) {
+    warnings.push(
+      `Not used in ${input.unusedDays} days` +
+        (input.staleDays !== undefined && input.staleDays < input.unusedDays
+          ? `, though the file itself changed ${input.staleDays} days ago — edited recently but not read since.`
+          : "."),
+    );
+  }
+
+  return warnings;
 }
 
 async function staleDays(vaultPath: string, notePath: string, now: Date): Promise<number | undefined> {
@@ -813,11 +923,21 @@ export async function recall(
 
   // Bodies for graph-only hits (never read during the lexical phase), so
   // every returned hit carries a snippet. Only the topK slice pays for this.
+  const rankedPaths = ranked.map((entry) => entry.path);
   const missing = ranked.filter((entry) => !entry.lexical).map((entry) => entry.path);
   const fetched = new Map<string, NoteRef>();
   for (const note of await readNotesInBatches(vaultPath, missing)) {
     if (note) fetched.set(note.path, note);
   }
+
+  // VNL-056: the supersession pass needs to know which notes exist before it
+  // can tell "replaced by that note" from "replaced by something that isn't
+  // in this vault", and it needs the usage graph for decay-derived staleness.
+  // Both are read once for the whole result set rather than per hit.
+  const [weights, resolver] = await Promise.all([
+    loadWeights(vaultDataDir),
+    listNotes(vaultPath).then(createNoteResolver),
+  ]);
 
   const hits: RecallHit[] = await Promise.all(
     ranked.map(async (entry) => {
@@ -839,6 +959,20 @@ export async function recall(
       if (days !== undefined) why.staleDays = days;
       if (supersededBy) why.supersededBy = supersededBy;
 
+      const unused = unusedDaysFrom(weights, entry.path, now);
+      if (unused !== undefined) why.unusedDays = unused;
+
+      const successorPath = supersededBy ? resolver.resolve(supersededBy) : undefined;
+      const warnings = warningsFor({
+        supersededBy,
+        successorResolved: successorPath !== undefined,
+        successorRankedAbove: successorPath ? rankedPaths.indexOf(successorPath) < rankedPaths.indexOf(entry.path) : undefined,
+        unusedDays: unused,
+        staleDays: days,
+        primed: sessionBuffer?.has(entry.path),
+      });
+      if (warnings.length > 0) why.warnings = warnings;
+
       return {
         path: entry.path,
         score: entry.score,
@@ -848,6 +982,38 @@ export async function recall(
       };
     }),
   );
+
+  // VNL-056: a superseded hit is told it is outdated; without the note that
+  // replaced it, that warning costs the agent a round trip to act on. The
+  // successor is appended rather than promoted — deliberately, per the
+  // founder's call: demoting the outdated note would hide history that is
+  // often exactly what was asked for ("what did we decide about X"), whereas
+  // guaranteeing its replacement is present takes nothing away.
+  const present = new Set(hits.map((hit) => hit.path));
+  for (const hit of [...hits]) {
+    const target = hit.why.supersededBy ? resolver.resolve(hit.why.supersededBy) : undefined;
+    if (!target || present.has(target)) continue;
+    present.add(target);
+
+    const [note] = await readNotesInBatches(vaultPath, [target]);
+    const successorUnused = unusedDaysFrom(weights, target, now);
+    hits.push({
+      path: target,
+      // Scored below every ranked hit: it did not match the query, and
+      // inventing a score for it would put it in competition with results
+      // that did. It is here as an answer to a warning, not as a result.
+      score: 0,
+      source: "successor",
+      snippet: note ? snippetFor(note.body, []) : "",
+      why: {
+        matchedTerms: [],
+        lexicalScore: 0,
+        supersedes: hit.path,
+        ...(successorUnused !== undefined && { unusedDays: successorUnused }),
+        ...(sessionBuffer?.has(target) && { primed: true }),
+      },
+    });
+  }
 
   return {
     query,
