@@ -59,7 +59,15 @@ describe("computeUsageReport", () => {
     });
     expect(report.topTouchedNotes).toEqual([]);
     expect(report.importanceOverlapPct).toBeNull();
-    expect(report.gaps).toEqual([]);
+    // VNL-057: an empty vault has one honest thing to say about usefulness —
+    // that it has not been measured. Reporting a rate of 0 instead would read
+    // as "nothing is ever useful".
+    expect(report.readThrough.recalls).toBe(0);
+    expect(report.readThrough.resultReadRate).toBeNull();
+    expect(report.gaps).toEqual([
+      "no recall calls have been logged yet, so there is no read-through rate — the number this " +
+        "project steers by (VNL-057) needs real sessions before it says anything.",
+    ]);
   });
 
   it("counts mechanisms and derives session span from one instance's events", async () => {

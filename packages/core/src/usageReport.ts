@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { loadNoteImportance } from "./importance.js";
+import { RECALL_LOG_DIR, computeReadThrough } from "./recallLog.js";
 import type {
   EventLogEntry,
   RetrievalLogEntry,
@@ -8,6 +9,7 @@ import type {
   UsageReport,
   UsageReportNoteTouch,
   UsageReportSession,
+  RecallLogEntry,
 } from "./types.js";
 
 const DEFAULT_TOP_N = 10;
@@ -56,14 +58,20 @@ function median(values: number[]): number | null {
  * Read-only and side-effect-free; safe to call as often as the caller likes.
  */
 export async function computeUsageReport(vaultDataDir: string, topN: number = DEFAULT_TOP_N): Promise<UsageReport> {
-  const [eventsByInstance, retrievalByInstance, searchByInstance, importanceFile] = await Promise.all([
+  const [eventsByInstance, retrievalByInstance, searchByInstance, recallByInstance, importanceFile] = await Promise.all([
     readJsonlDir<EventLogEntry>(join(vaultDataDir, "events")),
     readJsonlDir<RetrievalLogEntry>(join(vaultDataDir, "retrieval")),
     readJsonlDir<SearchLogEntry>(join(vaultDataDir, "search")),
+    readJsonlDir<RecallLogEntry>(join(vaultDataDir, RECALL_LOG_DIR)),
     loadNoteImportance(vaultDataDir),
   ]);
 
-  const instanceIds = new Set<string>([...eventsByInstance.keys(), ...retrievalByInstance.keys(), ...searchByInstance.keys()]);
+  const instanceIds = new Set<string>([
+    ...eventsByInstance.keys(),
+    ...retrievalByInstance.keys(),
+    ...searchByInstance.keys(),
+    ...recallByInstance.keys(),
+  ]);
 
   const sessions: UsageReportSession[] = [];
   let traverseCount = 0;
@@ -155,7 +163,22 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
       ? (topTouchedNotes.filter((n) => topImportancePaths.has(n.path)).length / topTouchedNotes.length) * 100
       : null;
 
+  // VNL-057: the production usefulness metric, folded across every instance's
+  // recall log rather than per session — read-through only means anything
+  // over a run of calls.
+  const readThrough = computeReadThrough([...recallByInstance.values()].flat());
+
   const gaps: string[] = [];
+  if (readThrough.recalls === 0) {
+    gaps.push(
+      "no recall calls have been logged yet, so there is no read-through rate — the number this " +
+        "project steers by (VNL-057) needs real sessions before it says anything.",
+    );
+  } else if (readThrough.recalls < 20) {
+    gaps.push(
+      `read-through is computed over only ${readThrough.recalls} recall calls — too few to read as a trend.`,
+    );
+  }
   if (searchCount === 0 && (traverseCount > 0 || activateTierCounts.activation > 0)) {
     gaps.push(
       "No search_notes activity recorded — either search hasn't been used, or these sessions predate " +
@@ -202,6 +225,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
     },
     topTouchedNotes,
     importanceOverlapPct,
+    readThrough,
     gaps,
   };
 }

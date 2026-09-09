@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { computeUsageReport, resolveDataDir, type ReadThroughReport } from "@vault-neural-links/core";
 import { createMcpServer, SERVER_VERSION } from "../src/server.js";
 import { makeToolContext } from "../src/tools.js";
 
@@ -130,6 +131,82 @@ describe("MCP client integration (VNL-007)", () => {
 
   it("list_notes with an escaping folder argument is rejected rather than listing outside the vault", async () => {
     await expectRefused(client.callTool({ name: "list_notes", arguments: { folder: "../.." } }));
+  });
+
+  // VNL-057. The attribution is a relationship between separate tool calls
+  // over the life of a session, so it can only really be verified by making
+  // those calls in order through the protocol — a unit test would be asserting
+  // on state it set up itself.
+  describe("read-through logging (VNL-057)", () => {
+    async function usageReport(): Promise<{ readThrough: ReadThroughReport }> {
+      return computeUsageReport(resolveDataDir(vaultPath)) as Promise<{ readThrough: ReadThroughReport }>;
+    }
+
+    beforeEach(async () => {
+      for (const path of ["Notes/Alpha", "Notes/Beta"]) {
+        await client.callTool({
+          name: "create_note",
+          arguments: { path, frontmatter: {}, body: "spreading activation write-up" },
+        });
+      }
+    });
+
+    it("logs a recall, the results opened afterwards, and the write that followed", async () => {
+      await client.callTool({ name: "recall", arguments: { query: "spreading activation write-up" } });
+      await client.callTool({ name: "read_note", arguments: { path: "Notes/Alpha" } });
+      await client.callTool({
+        name: "create_note",
+        arguments: { path: "Notes/Derived", frontmatter: {}, body: "written after reading" },
+      });
+
+      const { readThrough } = await usageReport();
+      expect(readThrough.recalls).toBe(1);
+      expect(readThrough.resultsReturned).toBeGreaterThan(0);
+      expect(readThrough.resultsRead).toBe(1);
+      expect(readThrough.recallsWithAnyRead).toBe(1);
+      expect(readThrough.recallsFollowedByWrite).toBe(1);
+    });
+
+    it("does not credit a read of a note the recall never returned", async () => {
+      await client.callTool({ name: "create_note", arguments: { path: "Notes/Unrelated", frontmatter: {}, body: "nothing alike" } });
+      await client.callTool({ name: "recall", arguments: { query: "spreading activation write-up" } });
+      await client.callTool({ name: "read_note", arguments: { path: "Notes/Unrelated" } });
+
+      const { readThrough } = await usageReport();
+      expect(readThrough.recalls).toBe(1);
+      expect(readThrough.resultsRead).toBe(0);
+      expect(readThrough.usefulRecallRate).toBe(0);
+    });
+
+    it("counts one read once, even when two recalls both returned the note", async () => {
+      await client.callTool({ name: "recall", arguments: { query: "spreading activation write-up" } });
+      await client.callTool({ name: "recall", arguments: { query: "spreading activation" } });
+      await client.callTool({ name: "read_note", arguments: { path: "Notes/Alpha" } });
+
+      const { readThrough } = await usageReport();
+      // Two calls, one physical read — crediting both would inflate the rate.
+      expect(readThrough.recalls).toBe(2);
+      expect(readThrough.resultsRead).toBe(1);
+      expect(readThrough.recallsWithAnyRead).toBe(1);
+    });
+
+    it("counts a session that writes repeatedly as one useful recall, not several", async () => {
+      await client.callTool({ name: "recall", arguments: { query: "spreading activation write-up" } });
+      await client.callTool({ name: "read_note", arguments: { path: "Notes/Alpha" } });
+      for (const path of ["Notes/One", "Notes/Two", "Notes/Three"]) {
+        await client.callTool({ name: "create_note", arguments: { path, frontmatter: {}, body: "more work" } });
+      }
+
+      const { readThrough } = await usageReport();
+      expect(readThrough.recallsFollowedByWrite).toBe(1);
+    });
+
+    it("says the number is not measured yet rather than reporting zero", async () => {
+      const { readThrough } = await usageReport();
+
+      expect(readThrough.recalls).toBe(0);
+      expect(readThrough.resultReadRate).toBeNull();
+    });
   });
 
   // VNL-055. A resource is the one thing here that reaches the model without

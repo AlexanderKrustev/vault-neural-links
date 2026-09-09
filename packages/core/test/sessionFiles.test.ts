@@ -81,6 +81,10 @@ describe("per-instance file housekeeping (VNL-009)", () => {
       "activation-sockets": 0,
       retrieval: 0,
       search: 0,
+      // VNL-057's recall log is pruned on the same retention as the other
+      // append-only logs; a log that outlived its siblings would let
+      // read-through cover a window the rest of the report cannot.
+      recall: 0,
     });
     expect(await readdir(join(dataDir, "session"))).toEqual(["notes.txt"]);
   });

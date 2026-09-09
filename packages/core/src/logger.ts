@@ -1,6 +1,7 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { EventLogEntry, RetrievalLogEntry, SearchLogEntry } from "./types.js";
+import type { EventLogEntry, RecallLogEntry, RetrievalLogEntry, SearchLogEntry } from "./types.js";
+import { recallLogFilePath } from "./recallLog.js";
 
 // Serializes appends per file so concurrent calls from the same instance
 // can't interleave partial writes (cross-instance safety comes from each
@@ -45,6 +46,20 @@ export async function appendRetrievalLog(
   entry: RetrievalLogEntry,
 ): Promise<void> {
   return queueAppend(retrievalLogFilePath(vaultDataDir, instanceId), `${JSON.stringify(entry)}\n`);
+}
+
+/**
+ * Appends one recall-log line (VNL-057): a call, a result opened afterwards,
+ * or a write that followed. Same append-only, per-instance shape as the
+ * other logs, so pruning and concurrent sessions need no special handling.
+ */
+export async function appendRecallLog(
+  vaultDataDir: string,
+  instanceId: string,
+  entry: RecallLogEntry,
+): Promise<void> {
+  return queueAppend(recallLogFilePath(vaultDataDir, instanceId), `${JSON.stringify(entry)}
+`);
 }
 
 export function searchLogFilePath(vaultDataDir: string, instanceId: string): string {

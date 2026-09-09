@@ -27,7 +27,7 @@ export * from "./types.js";
 export * from "./parser.js";
 export * from "./decay.js";
 export * from "./priming.js";
-export { appendEvent, appendSearchLog } from "./logger.js";
+export { appendEvent, appendRecallLog, appendSearchLog } from "./logger.js";
 export { compact } from "./compactor.js";
 export {
   activationSocketFilePath,
@@ -50,6 +50,7 @@ export {
 } from "./briefing.js";
 export { branchTokens, detectGitBranch } from "./gitBranch.js";
 export { createNoteResolver, type NoteResolver } from "./noteResolver.js";
+export { RECALL_LOG_DIR, computeReadThrough, recallLogFilePath } from "./recallLog.js";
 export {
   BENCHMARK_CONDITIONS,
   DEFAULT_BENCHMARK_TOP_K,

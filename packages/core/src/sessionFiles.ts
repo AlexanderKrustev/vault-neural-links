@@ -1,6 +1,7 @@
 import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { sessionBufferFilePath } from "./priming.js";
+import { RECALL_LOG_DIR } from "./recallLog.js";
 
 /**
  * VNL-009 — housekeeping for the per-instance files under the vault's data
@@ -70,6 +71,11 @@ export async function pruneStaleInstanceFiles(
     { dir: "activation-sockets", maxAgeDays: ephemeralStaleDays, suffix: ".json" },
     { dir: "retrieval", maxAgeDays: logRetentionDays, suffix: ".jsonl" },
     { dir: "search", maxAgeDays: logRetentionDays, suffix: ".jsonl" },
+    // VNL-057's recall log keeps the same retention as the other two: it is
+    // the same kind of thing (an append-only log the usage report folds), and
+    // a log that outlives its siblings would let read-through be computed
+    // over a window the rest of the report cannot cover.
+    { dir: RECALL_LOG_DIR, maxAgeDays: logRetentionDays, suffix: ".jsonl" },
   ];
 
   const removed: Record<string, number> = {};

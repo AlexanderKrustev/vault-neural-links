@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  appendRecallLog,
   appendUnderHeading,
   AUTO_REINFORCE_BOOST,
   CITED_REINFORCE_BOOST,
@@ -67,7 +69,27 @@ export interface ToolContext {
    * running again) re-states the same citation without re-paying for it.
    */
   citedEdges: Set<string>;
+  /** This server process's instance id, used to name its own append-only logs. */
+  instanceId: string;
+  /**
+   * VNL-057: recent `recall` calls still open for attribution, newest first.
+   *
+   * Bounded rather than unbounded because attribution gets less meaningful
+   * the further back it reaches — a note opened twenty calls later is not
+   * evidence about the call that returned it — and because an unbounded list
+   * would grow for the life of the process.
+   */
+  recentRecalls: {
+    id: string;
+    results: Set<string>;
+    read: Set<string>;
+    /** Set once a write has been credited to this recall, so one recall counts once. */
+    wroteFor: boolean;
+  }[];
 }
+
+/** How many recall calls stay open for read/write attribution. */
+const RECALL_ATTRIBUTION_WINDOW = 5;
 
 const VAULT_PATH_RULE =
   "Must stay inside the vault: no absolute paths, no '..' segments, and nothing under " +
@@ -183,6 +205,27 @@ export const recallTool = {
           return terms.length > 0 ? [[hit.path, { terms, trigger: "recall-read" as const }] as const] : [];
         }),
       );
+
+      // VNL-057: one line per call, then read/write lines attributed back to
+      // it as the session goes on. This is the production usefulness metric —
+      // whether results actually get opened — which is the thing VNL-020's
+      // benchmark cannot measure because its answers were chosen in advance.
+      const recallId = randomUUID();
+      await appendRecallLog(ctx.vaultDataDir, ctx.instanceId, {
+        ts: new Date().toISOString(),
+        instance: ctx.instanceId,
+        type: "returned",
+        recallId,
+        query,
+        resultCount: result.hits.length,
+      });
+      ctx.recentRecalls.unshift({
+        id: recallId,
+        results: new Set(result.hits.map((hit) => hit.path)),
+        read: new Set(),
+        wroteFor: false,
+      });
+      ctx.recentRecalls.length = Math.min(ctx.recentRecalls.length, RECALL_ATTRIBUTION_WINDOW);
 
       return textResult(result);
     },
@@ -459,6 +502,26 @@ async function creditCitations(ctx: ToolContext, notePath: string, agentText: st
     );
     credited.push(target);
   }
+
+  // VNL-057: a write following a read of a recall's results is the closest
+  // observable proxy for "the result reached the work". Reported separately
+  // from read-through rather than folded into it, because "opened" and "used"
+  // are different claims and conflating them is exactly what AIBRAIN-134's
+  // taxonomy exists to prevent. Credited to the most recent recall that had a
+  // read, once per recall — a session that writes five notes after one useful
+  // recall did not have five useful recalls.
+  const workedFrom = ctx.recentRecalls.find((entry) => entry.read.size > 0 && !entry.wroteFor);
+  if (workedFrom) {
+    workedFrom.wroteFor = true;
+    await appendRecallLog(ctx.vaultDataDir, ctx.instanceId, {
+      ts: new Date().toISOString(),
+      instance: ctx.instanceId,
+      type: "write",
+      recallId: workedFrom.id,
+      path: notePath,
+    });
+  }
+
   return credited;
 }
 
@@ -624,6 +687,25 @@ export const readNoteTool = {
         await ctx.client.learnTerms(termPending.terms, path, termPending.trigger);
         ctx.pendingTermRetrievals.delete(path);
       }
+
+      // VNL-057: opening a note that a recent recall returned is the
+      // unprompted judgement that the result was worth looking at. Credited
+      // to the *most recent* recall that returned it and only once: the same
+      // physical read counted against several calls would inflate the rate,
+      // and the newest call is the one the agent is plausibly acting on.
+      const openRecall = ctx.recentRecalls.find(
+        (entry) => entry.results.has(path) && !entry.read.has(path),
+      );
+      if (openRecall) {
+        openRecall.read.add(path);
+        await appendRecallLog(ctx.vaultDataDir, ctx.instanceId, {
+          ts: new Date().toISOString(),
+          instance: ctx.instanceId,
+          type: "read",
+          recallId: openRecall.id,
+          path,
+        });
+      }
     }
     return textResult(note ?? { error: `No note found at ${path}` });
   },
@@ -698,5 +780,7 @@ export function makeToolContext(vaultPath: string, instanceId: string): ToolCont
     pendingTermRetrievals: new Map(),
     notesRead: new Set(),
     citedEdges: new Set(),
+    instanceId,
+    recentRecalls: [],
   };
 }

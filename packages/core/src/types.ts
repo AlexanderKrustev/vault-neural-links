@@ -554,6 +554,56 @@ export interface RetrievalLogEntry {
  * alongside traverse/reinforce/activate, unconditionally regardless of what
  * the caller does with the results.
  */
+/**
+ * VNL-057 — one line per `recall` call, plus one per result that was
+ * subsequently opened, plus one when a write followed a read.
+ *
+ * A separate log from `search/` and `retrieval/` on purpose: those record
+ * call-level outcomes (tier, latency, result count), while this records a
+ * *relationship over time* between one call and what the agent did next, and
+ * folding the two would make both harder to read.
+ */
+export type RecallLogEntry =
+  | {
+      ts: string;
+      instance: string;
+      type: "returned";
+      /** Unique per recall call — what `read`/`write` lines attribute back to. */
+      recallId: string;
+      query: string;
+      resultCount: number;
+    }
+  | { ts: string; instance: string; type: "read"; recallId: string; path: string }
+  | { ts: string; instance: string; type: "write"; recallId: string; path: string };
+
+/**
+ * The production usefulness metric (VNL-057) — what share of what `recall`
+ * returned was actually opened, and how often a recall was followed by real
+ * work. Replaces "rank 1 of a pre-seeded target" as the number the project
+ * steers by; see recallLog.ts for what it can and cannot observe.
+ */
+export interface ReadThroughReport {
+  recalls: number;
+  resultsReturned: number;
+  resultsRead: number;
+  /** Recalls where at least one returned note was opened afterwards. */
+  recallsWithAnyRead: number;
+  /** Recalls where a note was written after one of their results was read. */
+  recallsFollowedByWrite: number;
+  /**
+   * Results read / results returned. The literal reading of "read-through
+   * rate", and structurally small: an agent that opens two of ten results
+   * scores 0.2 while having been served perfectly.
+   */
+  resultReadRate: number | null;
+  /** Recalls with any read / recalls — "did this call help at all". */
+  usefulRecallRate: number | null;
+  /** Recalls followed by a write / recalls — the closest observable proxy for "it reached the work". */
+  writeFollowRate: number | null;
+  firstRecallAt: string | null;
+  lastRecallAt: string | null;
+}
+
 export interface SearchLogEntry {
   ts: string;
   instance: string;
@@ -626,6 +676,12 @@ export interface UsageReport {
   topTouchedNotes: UsageReportNoteTouch[];
   /** % overlap between the top-touched notes and the top-importance notes (same N); null if either side is empty. */
   importanceOverlapPct: number | null;
+  /**
+   * Production usefulness (VNL-057) — what share of what `recall` returned
+   * was actually opened afterwards. The number this project steers by, in
+   * place of rank-1 against a pre-seeded target.
+   */
+  readThrough: ReadThroughReport;
   /** Known instrumentation or usage-pattern caveats surfaced alongside the numbers, e.g. mechanisms with no persisted trace. */
   gaps: string[];
 }

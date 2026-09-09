@@ -70,6 +70,36 @@ export class UsageReportPanel {
       cls: "vault-neural-links-usage-line",
     });
 
+    // VNL-057, placed above the mechanism counts on purpose: this is the
+    // number the project steers by, and everything below it is diagnostics
+    // for why this number is what it is.
+    const useful = this.resultsEl.createDiv({ cls: "vault-neural-links-usage-section" });
+    useful.createDiv({ text: "Was it useful?", cls: "vault-neural-links-usage-section-title" });
+    const rt = report.readThrough;
+    if (rt.recalls === 0) {
+      useful.createDiv({
+        text: "No recall calls logged yet — this fills in once the assistant starts asking the vault questions.",
+        cls: "vault-neural-links-usage-line",
+      });
+    } else {
+      const pct = (value: number | null): string => (value === null ? "—" : `${Math.round(value * 100)}%`);
+      useful.createDiv({
+        text: `${rt.recalls} recalls · ${pct(rt.usefulRecallRate)} led to opening a result`,
+        cls: "vault-neural-links-usage-line",
+      });
+      useful.createDiv({
+        text: `${rt.resultsRead} of ${rt.resultsReturned} returned notes were opened (${pct(rt.resultReadRate)})`,
+        cls: "vault-neural-links-usage-line",
+      });
+      // Reported apart from the two above because "a note was opened" and
+      // "a note reached the work" are different claims — the distinction
+      // AIBRAIN-134's taxonomy exists to keep.
+      useful.createDiv({
+        text: `${pct(rt.writeFollowRate)} were followed by writing a note`,
+        cls: "vault-neural-links-usage-line",
+      });
+    }
+
     const mechanisms = this.resultsEl.createDiv({ cls: "vault-neural-links-usage-section" });
     mechanisms.createDiv({ text: "Mechanisms fired", cls: "vault-neural-links-usage-section-title" });
     mechanisms.createDiv({ text: `traverse: ${report.mechanismCounts.traverse}`, cls: "vault-neural-links-usage-line" });
