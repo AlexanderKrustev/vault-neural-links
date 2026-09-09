@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { briefingByProjectResource, briefingPrompt, briefingResource } from "./resources.js";
 import {
   ablationDiffTool,
   activateTool,
@@ -53,6 +54,28 @@ export function createMcpServer(ctx: ToolContext): McpServer {
   for (const tool of tools) {
     server.registerTool(tool.name, tool.config as never, tool.handler(ctx) as never);
   }
+
+  // VNL-055. Registered alongside the tools rather than in a separate
+  // factory: a client that lists capabilities should see one server, and the
+  // briefing shares the same ToolContext (vault path, data dir) as everything
+  // else.
+  server.registerResource(
+    briefingResource.name,
+    briefingResource.uri,
+    briefingResource.config,
+    briefingResource.handler(ctx) as never,
+  );
+  server.registerResource(
+    briefingByProjectResource.name,
+    new ResourceTemplate(briefingByProjectResource.template, { list: undefined }),
+    briefingByProjectResource.config,
+    briefingByProjectResource.handler(ctx) as never,
+  );
+  server.registerPrompt(
+    briefingPrompt.name,
+    briefingPrompt.config as never,
+    briefingPrompt.handler(ctx) as never,
+  );
 
   return server;
 }

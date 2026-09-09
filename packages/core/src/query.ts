@@ -30,7 +30,7 @@ const USAGE_FAST_DECAY_HALF_LIFE_DAYS = 0.5;
 // window above.
 const USAGE_ESTABLISHED_TOUCH_COUNT = 3;
 
-async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null> {
+export async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null> {
   try {
     const content = await readFile(join(vaultDataDir, "link-weights.json"), "utf8");
     return JSON.parse(content) as LinkWeightsFile;

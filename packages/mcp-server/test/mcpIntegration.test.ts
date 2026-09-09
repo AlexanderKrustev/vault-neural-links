@@ -120,4 +120,54 @@ describe("MCP client integration (VNL-007)", () => {
   it("list_notes with an escaping folder argument is rejected rather than listing outside the vault", async () => {
     await expectRefused(client.callTool({ name: "list_notes", arguments: { folder: "../.." } }));
   });
+
+  // VNL-055. A resource is the one thing here that reaches the model without
+  // the model choosing to call anything, so whether it is actually advertised
+  // over the protocol is the whole feature — a registration mistake would be
+  // invisible to the unit tests, which never speak MCP.
+  describe("session briefing (VNL-055)", () => {
+    it("advertises the briefing resource and its project template", async () => {
+      const { resources } = await client.listResources();
+      expect(resources.map((resource) => resource.uri)).toContain("vault://briefing");
+
+      const { resourceTemplates } = await client.listResourceTemplates();
+      expect(resourceTemplates.map((template) => template.uriTemplate)).toContain("vault://briefing/{project}");
+    });
+
+    it("reads the briefing as markdown", async () => {
+      const result = await client.readResource({ uri: "vault://briefing" });
+
+      expect(result.contents).toHaveLength(1);
+      expect(result.contents[0].mimeType).toBe("text/markdown");
+      expect(String(result.contents[0].text)).toContain("Vault briefing");
+    });
+
+    it("scopes to a project named in the URI", async () => {
+      await client.callTool({
+        name: "create_note",
+        arguments: { path: "Notes/Widgets/Something", frontmatter: {}, body: "text" },
+      });
+
+      const result = await client.readResource({ uri: "vault://briefing/Widgets" });
+      const text = String(result.contents[0].text);
+
+      expect(text).toContain("Vault briefing — Widgets");
+      expect(text).toContain("Notes/Widgets/Something");
+    });
+
+    it("advertises the briefing prompt and returns a usable message", async () => {
+      const { prompts } = await client.listPrompts();
+      expect(prompts.map((prompt) => prompt.name)).toContain("vault-briefing");
+
+      const result = await client.getPrompt({ name: "vault-briefing" });
+      expect(result.messages[0].role).toBe("user");
+      expect(String(result.messages[0].content.text)).toContain("Vault briefing");
+    });
+
+    it("returns a briefing rather than failing on an empty vault with no indexes", async () => {
+      const result = await client.readResource({ uri: "vault://briefing/nothing-here" });
+
+      expect(String(result.contents[0].text)).toContain("No vault folder matches");
+    });
+  });
 });

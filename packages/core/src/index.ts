@@ -39,6 +39,16 @@ export {
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 export { buildContentIndex, loadContentIndex, rebuildContentIndex, candidatesFromIndex } from "./contentIndex.js";
 export {
+  DEFAULT_BRIEFING_SECTION_SIZE,
+  buildBriefing,
+  formatBriefing,
+  normalizeProjectKey,
+  scopesForProject,
+  type Briefing,
+  type BriefingNote,
+  type BriefingOptions,
+} from "./briefing.js";
+export {
   BENCHMARK_CONDITIONS,
   DEFAULT_BENCHMARK_TOP_K,
   formatBenchmarkReport,
