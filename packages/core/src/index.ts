@@ -47,6 +47,7 @@ export {
   type Briefing,
   type BriefingNote,
   type BriefingOptions,
+  type FormatBriefingOptions,
 } from "./briefing.js";
 export { branchTokens, detectGitBranch } from "./gitBranch.js";
 export { createNoteResolver, type NoteResolver } from "./noteResolver.js";

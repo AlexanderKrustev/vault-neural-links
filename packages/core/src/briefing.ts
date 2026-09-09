@@ -384,7 +384,10 @@ export async function buildBriefing(
     scopes,
     branch,
     branchUsedAs,
-    branchRelated: branchRelated.map((path) => decorate(path, `matches branch \`${branch}\``)),
+    // No per-line note: the section heading already names the branch, and
+    // repeating it on every row cost ~45 characters a line out of a budget
+    // that was dropping whole sections to stay inside itself.
+    branchRelated: branchRelated.map((path) => decorate(path, "")),
     recentlyUsed: used.map((entry) => {
       const days = daysSince(entry.lastTouched, now);
       return decorate(entry.path, days === null ? "used recently" : `last used ${agePhrase(days)}`);
@@ -442,6 +445,20 @@ function matchesMoc(path: string, project: string): boolean {
   return mocKey === key || mocKey === `${key}s` || `${mocKey}s` === key;
 }
 
+export interface FormatBriefingOptions {
+  /**
+   * Character budget. Whole sections are dropped from the least important
+   * end until the text fits, and a line says what was left out.
+   *
+   * Bounding by characters rather than by note count, because note count is
+   * not the thing that costs anything: measured on a real vault, the same
+   * five-notes-per-section briefing is 2,079 characters for one project and
+   * 2,771 for another whose folder paths happen to be twice as long. A
+   * budget in notes silently means something different per project.
+   */
+  maxChars?: number;
+}
+
 /**
  * The briefing as text for a model to read.
  *
@@ -449,8 +466,17 @@ function matchesMoc(path: string, project: string): boolean {
  * it as context, not code parsing it — and a section that is empty is omitted
  * entirely rather than rendered as an empty heading, since a briefing's whole
  * value is being short enough to actually be read.
+ *
+ * Section order is by what a reader loses most by not seeing, because that is
+ * also the order things get dropped in when the budget bites: an unprocessed
+ * inbox and the notes matching the current branch are *actionable now*, while
+ * "recently changed" and "central to this project" are background that keeps
+ * for another call. The first ordering shipped had exactly the wrong shape —
+ * background first, branch and inbox last — and a real session on a project
+ * with long folder paths cut off precisely the branch section the feature had
+ * been built for.
  */
-export function formatBriefing(briefing: Briefing): string {
+export function formatBriefing(briefing: Briefing, opts: FormatBriefingOptions = {}): string {
   const lines: string[] = [];
 
   if (briefing.project) {
@@ -483,21 +509,11 @@ export function formatBriefing(briefing: Briefing): string {
     lines.push(`## ${title}`);
     for (const entry of notes) {
       const stale = entry.supersededBy ? `  ⚠ superseded by ${entry.supersededBy}` : "";
-      lines.push(`- [[${entry.path}]] — ${entry.note}${stale}`);
+      const why = entry.note ? ` — ${entry.note}` : "";
+      lines.push(`- [[${entry.path}]]${why}${stale}`);
     }
     lines.push("");
   };
-
-  section("Recently worked with", briefing.recentlyUsed);
-  section("Recently changed", briefing.recentlyChanged);
-  section("Central to this project", briefing.central);
-  section(`Related to branch \`${briefing.branch}\``, briefing.branchRelated);
-
-  if (briefing.mocs.length > 0) {
-    lines.push("## Maps of content");
-    for (const moc of briefing.mocs) lines.push(`- [[${moc}]]`);
-    lines.push("");
-  }
 
   if (briefing.inboxCount > 0) {
     lines.push(`## Inbox`);
@@ -505,6 +521,17 @@ export function formatBriefing(briefing: Briefing): string {
       `${briefing.inboxCount} unprocessed item${briefing.inboxCount === 1 ? "" : "s"} in \`Inbox/\` — ` +
         "worth mentioning and offering `/process-inbox`.",
     );
+    lines.push("");
+  }
+
+  section(`Related to branch \`${briefing.branch}\``, briefing.branchRelated);
+  section("Recently worked with", briefing.recentlyUsed);
+  section("Recently changed", briefing.recentlyChanged);
+  section("Central to this project", briefing.central);
+
+  if (briefing.mocs.length > 0) {
+    lines.push("## Maps of content");
+    for (const moc of briefing.mocs) lines.push(`- [[${moc}]]`);
     lines.push("");
   }
 
@@ -519,5 +546,65 @@ export function formatBriefing(briefing: Briefing): string {
   }
 
   lines.push(`_Generated ${briefing.generatedAt}. Use \`recall\` to ask the vault a question._`);
-  return lines.join("\n");
+
+  return opts.maxChars === undefined ? lines.join("\n") : trimToBudget(lines, opts.maxChars);
+}
+
+/**
+ * Fits the briefing into `maxChars` by dropping whole `##` sections from the
+ * end, never by cutting a line in half.
+ *
+ * A half-line is worse than a missing section: `- [[02-Projects/Bulstrad/Bun`
+ * is a path that looks real, resolves to nothing, and a model asked to read
+ * it will either fail or guess. Sections are ordered by what a reader loses
+ * most by not seeing (see formatBriefing), so dropping from the end drops
+ * background before anything actionable — and the reader is told what went,
+ * so a short briefing is never mistaken for a quiet vault.
+ */
+function trimToBudget(lines: string[], maxChars: number): string {
+  const full = lines.join("\n");
+  if (full.length <= maxChars) return full;
+
+  // The trailing "_Generated …_" line is the footer, kept whatever happens.
+  const footer = lines[lines.length - 1];
+  const body = lines.slice(0, -1);
+
+  const sections: { title: string | null; lines: string[] }[] = [{ title: null, lines: [] }];
+  for (const line of body) {
+    if (line.startsWith("## ")) sections.push({ title: line.slice(3), lines: [line] });
+    else sections[sections.length - 1].lines.push(line);
+  }
+
+  const dropped: string[] = [];
+  const render = (): string => {
+    const kept = [...sections.flatMap((section) => section.lines), footer];
+    if (dropped.length > 0) {
+      kept.push(`_Omitted for length: ${dropped.join(", ")}. Ask \`recall\` for any of it._`);
+    }
+    return kept.join("\n");
+  };
+
+  // Shorten every section before sacrificing any of them. Dropping sections
+  // first let one long section eat the whole budget and leave the reader with
+  // a single heading — measured on a real project, where the branch section
+  // alone consumed it and "recently worked with" disappeared entirely. Four
+  // sections of two notes say more than one section of five.
+  for (let cap = 4; cap >= 1 && render().length > maxChars; cap--) {
+    for (const section of sections) {
+      if (section.title === null) continue;
+      const items = section.lines.filter((line) => line.startsWith("- "));
+      if (items.length <= cap) continue;
+      const rest = section.lines.filter((line) => !line.startsWith("- "));
+      // Heading first, then the surviving items, then whatever followed them
+      // (the blank line each section ends with).
+      section.lines = [rest[0], ...items.slice(0, cap), ...rest.slice(1)];
+    }
+  }
+
+  while (sections.length > 1 && render().length > maxChars) {
+    const last = sections.pop();
+    if (last?.title) dropped.unshift(last.title);
+  }
+
+  return render();
 }

@@ -343,6 +343,112 @@ describe("session briefing (VNL-055)", () => {
     });
   });
 
+  // Found by a real session: on a project whose folder paths are twice as
+  // long, the briefing came back visibly truncated by the client, having cut
+  // the branch section and the inbox flag — the two most actionable things in
+  // it. Bounding by note count was the mistake; note count is not what costs.
+  describe("length budget", () => {
+    /**
+     * Eight notes with long paths, cross-linked so the structural index and
+     * importance scoring have something to produce — otherwise "Central to
+     * this project" is legitimately empty and a test asserting on it is
+     * asserting on the fixture rather than on the trimming.
+     */
+    async function longVault(): Promise<void> {
+      for (let i = 0; i < 8; i++) {
+        await note(
+          `Notes/Widgets/A Deliberately Long Folder Path/Note Number ${i} With A Long Title`,
+          `links to [[Notes/Widgets/A Deliberately Long Folder Path/Note Number ${(i + 1) % 8} With A Long Title]]`,
+        );
+      }
+      await rebuildStructuralIndex(vaultPath, dataDir);
+      await runImportanceComputation(dataDir);
+    }
+
+    it("puts what is actionable now before what is background", async () => {
+      await note("Inbox/Scribble", "raw");
+      await note("Notes/Widgets/VNL-999 Thing", "links to [[Notes/Widgets/Other]]");
+      await note("Notes/Widgets/Other", "text");
+      await rebuildStructuralIndex(vaultPath, dataDir);
+      await runImportanceComputation(dataDir);
+
+      const text = formatBriefing(
+        await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: "feature/VNL-999" }),
+      );
+
+      // An unprocessed inbox and the notes matching this branch are things to
+      // act on; recency and link structure keep for another call. Order here
+      // is also drop order when the budget bites.
+      expect(text.indexOf("## Inbox")).toBeLessThan(text.indexOf("## Related to branch"));
+      expect(text.indexOf("## Related to branch")).toBeLessThan(text.indexOf("## Recently changed"));
+      expect(text.indexOf("## Recently changed")).toBeLessThan(text.indexOf("## Central to this project"));
+    });
+
+    it("stays inside the budget", async () => {
+      await longVault();
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
+
+      expect(formatBriefing(briefing).length).toBeGreaterThan(600);
+      expect(formatBriefing(briefing, { maxChars: 600 }).length).toBeLessThanOrEqual(600);
+    });
+
+    it("shrinks every section before sacrificing any of them", async () => {
+      await longVault();
+      await rebuildStructuralIndex(vaultPath, dataDir);
+      await runImportanceComputation(dataDir);
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
+
+      const full = formatBriefing(briefing);
+      const trimmed = formatBriefing(briefing, { maxChars: 900 });
+      const headings = (text: string) => text.split(/\r?\n/).filter((line) => line.startsWith("## ")).length;
+
+      // Four sections of two say more than one section of five, so trimming
+      // must cost items before it costs whole sections.
+      expect(trimmed.length).toBeLessThanOrEqual(900);
+      expect(headings(full)).toBeGreaterThan(1);
+      expect(headings(trimmed)).toBe(headings(full));
+    });
+
+    it("never cuts a line in half", async () => {
+      await longVault();
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
+
+      const trimmed = formatBriefing(briefing, { maxChars: 500 });
+
+      // A half path looks real, resolves to nothing, and a model asked to
+      // read it will either fail or guess.
+      for (const line of trimmed.split("\n").filter((l) => l.startsWith("- [["))) {
+        expect(line).toMatch(/\]\]/);
+      }
+    });
+
+    it("says what it left out, so a short briefing is not read as a quiet vault", async () => {
+      await longVault();
+      const briefing = await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: null });
+
+      // Tight enough that even one item per section cannot fit, so sections
+      // genuinely have to go.
+      const trimmed = formatBriefing(briefing, { maxChars: 320 });
+
+      expect(trimmed).toContain("Omitted for length");
+      expect(trimmed).toContain("Ask `recall`");
+    });
+
+    it("does not repeat the branch name on every row of its own section", async () => {
+      await note("Notes/Widgets/VNL-999 Thing", "text");
+
+      const text = formatBriefing(
+        await buildBriefing(vaultPath, dataDir, { project: "Widgets", branch: "feature/VNL-999" }),
+      );
+
+      const rows = text.split("\n").filter((line) => line.startsWith("- [[Notes/Widgets/VNL-999"));
+      expect(rows.length).toBeGreaterThan(0);
+      // The heading already names the branch; repeating it per row cost ~45
+      // characters a line out of a budget that was dropping whole sections.
+      expect(rows.every((row) => !row.includes("matches branch"))).toBe(true);
+    });
+  });
+
   describe("degradation", () => {
     // This runs before the agent has done anything, on a vault that may never
     // have had a nightly run. A thin briefing is fine; a failed one is not.

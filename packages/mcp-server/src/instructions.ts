@@ -40,6 +40,20 @@ const BRIEFING_DEADLINE_MS = 3000;
 const BRIEFING_SECTION_SIZE = 5;
 
 /**
+ * Character budget for the briefing half.
+ *
+ * A real session on a project with long folder paths came back visibly
+ * truncated, having cut the branch section and the inbox flag — the two most
+ * actionable things in it — because the size had been bounded by note count
+ * and note count is not what costs anything: the same five-per-section
+ * briefing measured 2,079 characters on one project and 2,771 on another
+ * whose paths are twice as long. 1,800 leaves room for the static half inside
+ * whatever the client is willing to carry, and `formatBriefing` drops whole
+ * sections from the least-actionable end to fit, saying what it dropped.
+ */
+const BRIEFING_MAX_CHARS = 1800;
+
+/**
  * What the server says about itself, independent of any vault content. This
  * half is always sent, including when the briefing fails.
  */
@@ -79,7 +93,7 @@ export async function buildServerInstructions(
   // A briefing that matched no project is a list of whatever the vault
   // touched most recently, which is noise in front of every session — so the
   // project half waits until it has something to say about *this* project.
-  if (briefing.project) parts.push(formatBriefing(briefing));
+  if (briefing.project) parts.push(formatBriefing(briefing, { maxChars: BRIEFING_MAX_CHARS }));
 
   // The inbox flag is deliberately outside that condition. It is the one
   // thing here that is true of the vault rather than of the project, and the
