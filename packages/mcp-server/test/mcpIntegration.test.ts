@@ -60,6 +60,23 @@ describe("MCP client integration (VNL-007)", () => {
     await rm(vaultPath, { recursive: true, force: true });
   });
 
+  // The same 2048-character cap that truncates server instructions applies
+  // to tool descriptions — observed in the same `claude --debug` log, against
+  // another server: `Tool "xdebug_control_session" description truncated from
+  // 2273 to 2048 chars`. A description cut mid-sentence loses whatever was
+  // said last, which in this server's case is the guidance on when *not* to
+  // use a tool.
+  it("keeps every tool description inside the 2048 characters a client will carry", async () => {
+    const { tools } = await client.listTools();
+
+    for (const tool of tools) {
+      expect(
+        (tool.description ?? "").length,
+        `${tool.name}'s description would be truncated by the client`,
+      ).toBeLessThanOrEqual(2048);
+    }
+  });
+
   it("tools/list advertises exactly the twelve supported tools", async () => {
     const { tools } = await client.listTools();
 
