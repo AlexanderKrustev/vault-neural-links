@@ -403,6 +403,11 @@ describe("AIBRAIN-21: PageRank importance blended into retrieval weight", () => 
 // a note the current session had just touched. Fix: a primed neighbor's
 // weight is floored at "the strongest unprimed neighbor in this same set,
 // plus a small margin" instead of a flat additive bonus.
+// VNL-058: priming left the default serving path on 2026-09-09 — it measured
+// -0.017 MRR in the realistic condition, where the session buffer holds a
+// neighbour of the answer rather than the answer itself. These cases ask for
+// it explicitly. They still matter: the mechanism is intact and reachable,
+// and if it is ever re-enabled these are what say it still behaves as built.
 describe("AIBRAIN-130: primed neighbor beats a stronger unprimed hub", () => {
   let dataDir: string;
   let vaultPath: string;
@@ -427,12 +432,12 @@ describe("AIBRAIN-130: primed neighbor beats a stronger unprimed hub", () => {
     await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Target", weight_delta: 1 }));
     await compact(dataDir);
 
-    const withoutPriming = await getWeightedNeighbors(dataDir, "Origin", 10);
+    const withoutPriming = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, undefined, DEFAULT_ABLATION_LAYERS);
     expect(withoutPriming[0].path).toBe("Hub"); // confirms the setup: Hub genuinely outweighs Target pre-priming
 
     const buffer = new SessionBuffer();
     buffer.touch("Target"); // "the session already read Target"
-    const primed = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer);
+    const primed = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer, DEFAULT_ABLATION_LAYERS);
     expect(primed[0].path).toBe("Target");
     expect(primed.find((n) => n.path === "Target")!.weight).toBeGreaterThan(
       primed.find((n) => n.path === "Hub")!.weight,
@@ -446,7 +451,7 @@ describe("AIBRAIN-130: primed neighbor beats a stronger unprimed hub", () => {
 
     const buffer = new SessionBuffer();
     buffer.touch("Target");
-    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer);
+    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer, DEFAULT_ABLATION_LAYERS);
     const target = neighbors.find((n) => n.path === "Target")!;
     const hub = neighbors.find((n) => n.path === "Hub")!;
 
@@ -463,7 +468,7 @@ describe("AIBRAIN-130: primed neighbor beats a stronger unprimed hub", () => {
     await appendEvent(dataDir, "inst-1", event({ from: "Origin", to: "Target", weight_delta: 1 }));
     await compact(dataDir);
 
-    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, new SessionBuffer());
+    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, new SessionBuffer(), DEFAULT_ABLATION_LAYERS);
     expect(neighbors[0].path).toBe("Hub");
   });
 });
@@ -497,7 +502,7 @@ describe("AIBRAIN-141: priming's force-rank fades as the touch grows stale", () 
     const buffer = new SessionBuffer();
     buffer.touch("Target", new Date(Date.now() - 3 * 60 * 60 * 1000));
 
-    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer);
+    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer, DEFAULT_ABLATION_LAYERS);
     // Back to ranking exactly like an unprimed neighbor: Hub's real weight wins.
     expect(neighbors[0].path).toBe("Hub");
   });
@@ -510,7 +515,7 @@ describe("AIBRAIN-141: priming's force-rank fades as the touch grows stale", () 
     const buffer = new SessionBuffer();
     buffer.touch("Target");
 
-    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer);
+    const neighbors = await getWeightedNeighbors(dataDir, "Origin", 10, undefined, buffer, DEFAULT_ABLATION_LAYERS);
     expect(neighbors[0].path).toBe("Target");
   });
 });

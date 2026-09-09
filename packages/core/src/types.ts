@@ -429,15 +429,28 @@ export const DEFAULT_ABLATION_LAYERS: AblationLayers = {
  * visible — 0.6835 MRR and 39/70 rank-1, i.e. it is carrying real retrieval,
  * exactly as AIBRAIN-31 found.
  *
- * `priming` stays on pending a decision, not because it measured well. It is
- * +0.039 MRR in the target-primed condition and **−0.017 in the
- * related-primed one** — it helps when the buffer already holds the answer,
- * which is the circular case, and hurts in the realistic case where you have
- * been reading around a subject. Flipping it is a positioning decision as
- * much as a technical one, since D3 names session priming in the headline.
+ * `priming` is **off**, decided by the founder on 2026-09-09 once the
+ * measurement was put plainly. It scores +0.039 MRR in the target-primed
+ * condition and **−0.017 in the related-primed one**. The first is the
+ * circular case — the buffer already holds the note being searched for, so
+ * the engine is being asked whether it can find what it was just told. The
+ * second is what real work looks like: you have read *around* a subject and
+ * now want the note you have not seen. There priming pushes what you have
+ * already read above what you are looking for, which is the opposite of
+ * useful. In one sentence: it made the engine repeat itself.
+ *
+ * This overturns a positioning claim, not just a default — D3 led with
+ * "session priming" as one of three headline mechanisms, and that clause is
+ * struck from the headline rather than quietly kept while the code stops
+ * doing it (see docs/PLAN.md D3 and §9).
+ *
+ * The mechanism stays implemented and reachable. `why.primed` still reports
+ * whether a hit was seen this session, since that is information about the
+ * result rather than a thumb on the scale, and VNL-056 still uses it to
+ * suppress a staleness warning on a note read minutes ago.
  */
 export const HOT_PATH_ABLATION_LAYERS: AblationLayers = {
-  priming: true,
+  priming: false,
   importance: false,
   consolidation: false,
   structuralFallback: true,

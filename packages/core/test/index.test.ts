@@ -51,7 +51,15 @@ describe("initInstance", () => {
     expect(result.edgeCount).toBe(1);
   });
 
-  it("gives a session-primed neighbor a higher score than an equally-weighted one that hasn't been touched this session", async () => {
+  // VNL-058, 2026-09-09: the founder turned priming off in the serving path
+  // after it measured -0.017 MRR in the realistic condition — where the
+  // session buffer holds a *neighbour* of the answer rather than the answer,
+  // and boosting what you have already read pushes it above what you are
+  // looking for. So the contract this asserts is the reverse of what it
+  // asserted before: reading a note this session must not, by itself, move it
+  // up the ranking. That the mechanism still works when asked for is covered
+  // in pipeline.test.ts.
+  it("does not boost a neighbour just because it was touched this session", async () => {
     const vaultDataDir = join(vaultPath, ".vault-neural-links");
     // Seed both edges directly (bypassing the client) so seeding itself
     // doesn't touch the session buffer.
@@ -61,14 +69,16 @@ describe("initInstance", () => {
     const client = initInstance(vaultPath, "test-instance");
     await client.compact();
 
-    // Only B is visited this session; C has identical base weight but is
-    // never touched, so only B should carry the priming bonus.
+    // Only B is visited this session; C has identical base weight and is
+    // never touched. Before VNL-058 that alone put B ahead.
     await client.logTraversal("X", "B");
 
     const neighbors = await client.getWeightedNeighbors("A");
     const b = neighbors.find((n) => n.path === "B")!;
     const c = neighbors.find((n) => n.path === "C")!;
-    expect(b.weight).toBeGreaterThan(c.weight);
+    // Identical base weight, one of them visited this session: they rank
+    // together, because the visit is not evidence about relevance to a query.
+    expect(b.weight).toBeCloseTo(c.weight, 6);
   });
 
   it("emits an edge_traversed event on logTraversal and reinforce, not just activate", async () => {
