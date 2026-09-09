@@ -24,7 +24,8 @@
   },
   "bin": {
     "vnl-compact": "./bin/vnl-compact.js",
-    "vnl-nightly": "./bin/vnl-nightly.js"
+    "vnl-nightly": "./bin/vnl-nightly.js",
+    "vnl-embed": "./bin/vnl-embed.js"
   },
   "files": [
     "dist",

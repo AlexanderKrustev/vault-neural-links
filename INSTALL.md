@@ -62,9 +62,14 @@ words. It is off by default and nothing depends on it.
 npm install @huggingface/transformers   # alongside the MCP server
 ```
 
-Then turn on **"Match meaning, not just words"** in the plugin's settings.
-The next nightly run embeds every note locally and writes
-`.vault-neural-links/embeddings.json`; from then on `recall` blends cosine
+Then build the index once, out of process:
+
+```bash
+node packages/core/bin/vnl-embed.js <vault-path>    # or: npx vnl-embed <vault-path>
+```
+
+and turn on **"Match meaning, not just words"** in the plugin's settings so
+the nightly job keeps it current. From then on `recall` blends cosine
 similarity into its ranking and reports a `semanticScore` per hit.
 
 Two things worth knowing before enabling it:
@@ -73,8 +78,12 @@ Two things worth knowing before enabling it:
   from HuggingFace's CDN. That is the only network request this project
   makes. Everything after it runs offline on your machine, and note text is
   never sent anywhere.
-- **The first build takes a while** — roughly a second per few notes on a
-  laptop CPU, once. Later runs only re-embed notes whose text changed.
+- **Build it with the CLI, not by waiting for the nightly job.** Measured on
+  a real 494-note vault: 2.4 s to load the model, then ~28 notes/second —
+  about 18 seconds in total. That is fine in a terminal and not fine on
+  Obsidian's main thread, which is where the nightly job runs it (VNL-033).
+  Later runs only re-embed notes whose text changed, so the nightly refresh
+  is cheap; it is the first full build that wants the CLI.
 
 If the package isn't installed, or the model can't load, the setting has no
 effect and retrieval behaves exactly as it does without it. Vaults above
