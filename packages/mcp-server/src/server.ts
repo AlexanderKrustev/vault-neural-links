@@ -31,8 +31,14 @@ export const SERVER_VERSION = version;
  * schema validation, tool registration and error mapping the way a client
  * does, none of which is covered by calling the handlers directly.
  */
-export function createMcpServer(ctx: ToolContext): McpServer {
-  const server = new McpServer({ name: "vault-neural-link", version });
+export function createMcpServer(ctx: ToolContext, instructions?: string): McpServer {
+  // VNL-064: `instructions` is returned in the `initialize` result, so this
+  // is the one place in MCP where the server may speak before it is spoken
+  // to — no resource to attach, no tool to call, no client-specific hook.
+  const server = new McpServer(
+    { name: "vault-neural-link", version },
+    ...(instructions ? [{ instructions }] : []),
+  );
 
   const tools = [
     recallTool,

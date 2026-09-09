@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { removeInstanceFiles } from "@vault-neural-links/core";
 import { startActivationSocketServer } from "./activationSocket.js";
+import { buildServerInstructions } from "./instructions.js";
 import { createMcpServer } from "./server.js";
 import { makeToolContext } from "./tools.js";
 
@@ -17,6 +18,13 @@ if (!vaultPath) {
 
 const instanceId = `mcp-${randomUUID()}`;
 const ctx = makeToolContext(vaultPath, instanceId);
+
+// VNL-064: built before the server so it can travel in the `initialize`
+// result. Awaited on purpose — it is the one thing that must be ready before
+// the client is told what this server is — and bounded and fail-open inside,
+// so a slow or unreadable vault costs a plain instruction string rather than
+// a session. Measured at 25-35 ms on a 494-note vault.
+const instructions = await buildServerInstructions(ctx);
 
 // VNL-002: the activation socket is an optional convenience for the Obsidian
 // plugin's live graph. A bind failure (no loopback, a sandbox that forbids
@@ -62,6 +70,6 @@ process.stdin.on("end", () => {
   void shutdown();
 });
 
-const server = createMcpServer(ctx);
+const server = createMcpServer(ctx, instructions);
 
 await server.connect(new StdioServerTransport());

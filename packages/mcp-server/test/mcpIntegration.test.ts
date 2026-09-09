@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { computeUsageReport, resolveDataDir, type ReadThroughReport } from "@vault-neural-links/core";
+import { buildServerInstructions } from "../src/instructions.js";
 import { createMcpServer, SERVER_VERSION } from "../src/server.js";
 import { makeToolContext } from "../src/tools.js";
 
@@ -131,6 +132,71 @@ describe("MCP client integration (VNL-007)", () => {
 
   it("list_notes with an escaping folder argument is rejected rather than listing outside the vault", async () => {
     await expectRefused(client.callTool({ name: "list_notes", arguments: { folder: "../.." } }));
+  });
+
+  // VNL-064. The whole claim is that the vault reaches a session without
+  // anyone attaching, mentioning or calling anything — so the only test that
+  // means something is what a real client receives from `initialize`.
+  describe("server instructions (VNL-064)", () => {
+    async function connectWith(instructions: string | undefined): Promise<Client> {
+      const server = createMcpServer(makeToolContext(vaultPath, "instructions-test"), instructions);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const fresh = new Client({ name: "instructions-test-client", version: "1.0.0" });
+      await Promise.all([fresh.connect(clientTransport), server.connect(serverTransport)]);
+      return fresh;
+    }
+
+    it("delivers instructions to the client at initialize, with no request from either side", async () => {
+      const fresh = await connectWith(await buildServerInstructions(makeToolContext(vaultPath, "x")));
+
+      const instructions = fresh.getInstructions();
+      expect(instructions).toBeTruthy();
+      expect(instructions).toContain("recall");
+      await fresh.close();
+    });
+
+    it("still connects when no instructions are supplied", async () => {
+      const fresh = await connectWith(undefined);
+
+      expect(fresh.getInstructions()).toBeUndefined();
+      // The server is fully usable either way — instructions are additive.
+      const { tools } = await fresh.listTools();
+      expect(tools.length).toBeGreaterThan(0);
+      await fresh.close();
+    });
+
+    it("sends the static half alone when the vault matches no project", async () => {
+      // The temp vault is not named after any folder in itself, so no project
+      // resolves — and a briefing about nothing in particular is noise in
+      // front of every session.
+      const instructions = await buildServerInstructions(makeToolContext(vaultPath, "x"));
+
+      expect(instructions).toContain("weighted-link memory");
+      expect(instructions).not.toContain("Vault briefing");
+    });
+
+    it("includes the briefing once a project resolves", async () => {
+      await client.callTool({
+        name: "create_note",
+        arguments: { path: "Widgets/A Note", frontmatter: {}, body: "text" },
+      });
+
+      // In production the project comes from the server process's working
+      // directory — the repository the client launched it in.
+      const instructions = await buildServerInstructions(makeToolContext(vaultPath, "x"), {
+        cwd: "/somewhere/widgets",
+      });
+
+      expect(instructions).toContain("Vault briefing — widgets");
+      expect(instructions).toContain("A Note");
+    });
+
+    it("survives a vault it cannot read, rather than failing to start", async () => {
+      const missing = join(tmpdir(), "vnl-does-not-exist-", String(Date.now()));
+      const instructions = await buildServerInstructions(makeToolContext(missing, "x"));
+
+      expect(instructions).toContain("weighted-link memory");
+    });
   });
 
   // VNL-057. The attribution is a relationship between separate tool calls
