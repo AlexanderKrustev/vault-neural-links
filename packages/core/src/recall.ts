@@ -4,6 +4,7 @@ import { candidatesFromIndex, loadContentIndex } from "./contentIndex.js";
 import {
   DEFAULT_SEMANTIC_CANDIDATES,
   DEFAULT_SEMANTIC_FLOOR,
+  DEFAULT_SEMANTIC_RELATIVE_CUT,
   getSharedEmbeddingProvider,
   loadEmbeddings,
   semanticScores,
@@ -199,10 +200,15 @@ export interface RecallOptions {
    */
   semanticWeight?: number;
   /**
-   * Cosine floor a note must clear to count as a semantic match at all
-   * (default 0.35). Below it, unrelated prose scores as a match.
+   * Absolute cosine floor a note must clear to count as a semantic match at
+   * all (default 0.2) — a noise guard for a query that matches nothing.
    */
   semanticFloor?: number;
+  /**
+   * Fraction of this query's best cosine a note must reach (default 0.6).
+   * The filter that does the real work; 0 disables it.
+   */
+  semanticRelativeCut?: number;
   /** How many semantic hits may enter the blend (default 20). */
   semanticCandidates?: number;
   /**
@@ -420,6 +426,7 @@ async function staleDays(vaultPath: string, notePath: string, now: Date): Promis
 interface SemanticPhaseOptions {
   semanticWeight: number;
   semanticFloor: number;
+  semanticRelativeCut: number;
   semanticCandidates: number;
   embeddings?: EmbeddingsFile | null | false;
   embeddingProvider?: EmbeddingProvider | null;
@@ -464,6 +471,7 @@ async function semanticPhase(
 
     return semanticScores(index, queryVector, {
       floor: opts.semanticFloor,
+      relativeCut: opts.semanticRelativeCut,
       topN: opts.semanticCandidates,
     });
   } catch {
@@ -488,6 +496,7 @@ export async function recall(
     termWeight = DEFAULT_TERM_WEIGHT,
     semanticWeight = DEFAULT_SEMANTIC_WEIGHT,
     semanticFloor = DEFAULT_SEMANTIC_FLOOR,
+    semanticRelativeCut = DEFAULT_SEMANTIC_RELATIVE_CUT,
     semanticCandidates = DEFAULT_SEMANTIC_CANDIDATES,
     embeddings,
     embeddingProvider,
@@ -566,6 +575,7 @@ export async function recall(
   const semantic = await semanticPhase(vaultDataDir, query, {
     semanticWeight,
     semanticFloor,
+    semanticRelativeCut,
     semanticCandidates,
     embeddings,
     embeddingProvider,
@@ -663,11 +673,23 @@ export async function recall(
       const lexicalNorm = lexical && maxLexical > 0 ? lexical.score / maxLexical : 0;
       const graphNorm = graphHit && maxEnergy > 0 ? graphHit.energy / maxEnergy : 0;
       const termNorm = termHit && maxTermScore > 0 ? termHit.score / maxTermScore : 0;
-      // Not normalized against the best value in this result set, unlike
-      // every other axis: cosine is already a bounded, cross-query
-      // comparable [0,1]. Normalizing it would promote the best of a set of
-      // uniformly poor semantic matches to a full-strength signal, which is
-      // exactly what a floor-plus-absolute-score axis is meant to prevent.
+      // Used raw, unlike every other axis, which is divided by the best
+      // value in this result set.
+      //
+      // The original reason given here was that cosine is bounded and
+      // comparable across queries. Measured against the real vault, that is
+      // only true of *symmetric* comparisons: two short paraphrases score
+      // 0.64, while the same model comparing a short question to a note's
+      // 1200-character opening puts every result — right and wrong alike —
+      // between 0.19 and 0.46. So the absolute value does not mean what a
+      // fixed scale would imply.
+      //
+      // It is still not normalized, for the opposite reason: normalizing
+      // would hand the best of a uniformly poor set a full-strength score.
+      // Instead `semanticScores` has already applied a relative cut against
+      // this query's own best, which is where the compressed distribution is
+      // actually handled — so what arrives here is a survivor of that cut,
+      // and its raw magnitude only modulates a signal already judged real.
       const semanticNorm = semanticHit ?? 0;
       const source: RecallHit["source"] =
         lexical && graphHit

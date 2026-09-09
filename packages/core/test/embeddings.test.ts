@@ -231,12 +231,72 @@ describe("embeddings", () => {
       expect(ranked[1]).toBe("Beta.md");
     });
 
-    it("drops notes below the similarity floor, so unrelated prose isn't a match", async () => {
+    it("drops notes below the absolute floor, so a query matching nothing returns nothing", async () => {
       const index = await indexOf({ Alpha: [1, 0, 0], Gamma: [0, 1, 0] });
-      const scores = semanticScores(index, normalize(Float32Array.from([1, 0, 0])), { floor: 0.35 });
+      const scores = semanticScores(index, normalize(Float32Array.from([0, 1, 0.05])), {
+        floor: 0.35,
+        relativeCut: 0,
+      });
 
-      expect(scores.has("Alpha.md")).toBe(true);
-      expect(scores.has("Gamma.md")).toBe(false);
+      // Gamma is the closest note in the vault, but "closest" is not "close".
+      expect(scores.has("Alpha.md")).toBe(false);
+      expect(scores.size).toBe(1);
+      expect(scores.get("Gamma.md")).toBeGreaterThan(0.35);
+    });
+
+    // The case that shipped broken for one afternoon: against the real vault
+    // every cosine, right answer and wrong answer alike, sits between 0.19
+    // and 0.46 — because a short query against a long note is an asymmetric
+    // comparison. A fixed threshold either admits that whole band or rejects
+    // it whole. What identifies the right note is its distance above the
+    // rest of its own distribution.
+    it("keeps a clear winner inside a compressed distribution, and drops the pack behind it", async () => {
+      const index = await indexOf({
+        Right: [1, 0, 0],
+        Near1: [0.55, 0.84, 0],
+        Near2: [0.5, 0.87, 0],
+      });
+      // Cosines land at roughly 1.0 / 0.55 / 0.5 — the real vault's
+      // 0.446-vs-0.244 shape.
+      const scores = semanticScores(index, normalize(Float32Array.from([1, 0, 0])), {
+        floor: 0.2,
+        relativeCut: 0.6,
+      });
+
+      expect([...scores.keys()]).toEqual(["Right.md"]);
+    });
+
+    it("keeps every near-equal note when nothing stands out", async () => {
+      const index = await indexOf({ A: [1, 0, 0], B: [0.99, 0.14, 0], C: [0.98, 0.2, 0] });
+      const scores = semanticScores(index, normalize(Float32Array.from([1, 0, 0])), {
+        floor: 0.2,
+        relativeCut: 0.6,
+      });
+
+      // A genuine three-way tie is a real answer, not a failure to
+      // discriminate — the cut only removes what the best result outclasses.
+      expect(scores.size).toBe(3);
+    });
+
+    it("admits a match the old fixed 0.35 floor would have rejected outright", async () => {
+      // Cosine ~0.30: below the floor this shipped with, and the only thing
+      // in its query's distribution. Two of four real queries looked exactly
+      // like this, and returned nothing at all.
+      const index = await indexOf({ Only: [1, 0, 0], Far: [0, 1, 0] });
+      const query = normalize(Float32Array.from([0.3, 0, 0.954]));
+
+      expect(semanticScores(index, query, { floor: 0.35 }).size).toBe(0);
+      expect(semanticScores(index, query, { floor: 0.2, relativeCut: 0.6 }).size).toBe(1);
+    });
+
+    it("disables the relative cut at 0", async () => {
+      const index = await indexOf({ Right: [1, 0, 0], Near: [0.55, 0.84, 0] });
+      const scores = semanticScores(index, normalize(Float32Array.from([1, 0, 0])), {
+        floor: 0,
+        relativeCut: 0,
+      });
+
+      expect(scores.size).toBe(2);
     });
 
     it("caps how many notes may enter the blend", async () => {

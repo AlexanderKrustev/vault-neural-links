@@ -77,13 +77,39 @@ export const EMBEDDING_TEXT_LIMIT = 1200;
 export const DEFAULT_EMBEDDING_BATCH_SIZE = 32;
 
 /**
- * The minimum a note's cosine similarity must reach to be considered a
- * semantic candidate at all. Cosine over MiniLM is never near zero for two
- * pieces of natural language — unrelated English text sits around 0.1-0.3 —
- * so without a floor every note in the vault is a "match" and the axis
- * becomes noise once normalized. Not tuned; VNL-020 is where it is earned.
+ * Absolute noise guard: below this cosine, nothing counts as a match no
+ * matter how the rest of the query scored. Deliberately low, because it is
+ * not the instrument doing the real work — `DEFAULT_SEMANTIC_RELATIVE_CUT`
+ * is. Its only job is to stop a query that genuinely matches nothing from
+ * promoting the least-irrelevant note in the vault.
+ *
+ * Measured against the real 494-note vault (2026-09-09), which is why this
+ * is 0.2 and not the 0.35 it shipped as for one afternoon: the whole cosine
+ * distribution for real queries lands in **0.19-0.46**, not the 0-1 range a
+ * fixed threshold implies. A short question against a note's 1200-character
+ * opening is an *asymmetric* comparison, and MiniLM compresses those hard —
+ * the same model scores two short paraphrases 0.64. At 0.35, two of four
+ * real queries admitted nothing at all and the axis was silently inert.
  */
-export const DEFAULT_SEMANTIC_FLOOR = 0.35;
+export const DEFAULT_SEMANTIC_FLOOR = 0.2;
+
+/**
+ * A note must score at least this fraction of the *best* cosine in the same
+ * query to survive. This, not the absolute floor, is what separates signal
+ * from noise here.
+ *
+ * The measurement that forced it: on "paying for the product" the correct
+ * note scored 0.446 and the runner-up 0.244 — an enormous separation
+ * sitting entirely inside a band that any single absolute threshold either
+ * admits whole or rejects whole. Where the distribution *sits* is a
+ * function of query and document length; what identifies the right note is
+ * how far it stands above the rest of its own distribution. So the cut is
+ * relative and travels with the query.
+ *
+ * 0.6 from four real queries, which is not a tuned number — VNL-020 sweeps
+ * this and the floor together.
+ */
+export const DEFAULT_SEMANTIC_RELATIVE_CUT = 0.6;
 
 /** How many semantic hits are allowed to enter the blend for one query. */
 export const DEFAULT_SEMANTIC_CANDIDATES = 20;
@@ -351,23 +377,36 @@ export async function rebuildEmbeddings(
 }
 
 export interface SemanticScoreOptions {
+  /** Absolute cosine below which nothing counts, whatever the rest of the query did. */
   floor?: number;
+  /** Fraction of this query's best cosine a note must reach. 0 disables the relative cut. */
+  relativeCut?: number;
   topN?: number;
 }
 
 /**
- * Cosine of `queryVector` against every stored note vector, keeping only
- * scores at or above `floor` and only the best `topN`. A linear scan: at
- * real-vault scale (474 notes x 384 dims) this is ~180k multiply-adds, well
- * under a millisecond, and the note limit above keeps it from being run
- * where it would not be.
+ * Cosine of `queryVector` against every stored note vector, filtered by both
+ * an absolute floor and a cut relative to this query's own best score, and
+ * capped at `topN`. A linear scan: at real-vault scale (494 notes x 384
+ * dims) this is ~190k multiply-adds, well under a millisecond, and the note
+ * limit above keeps it from being run where it would not be.
+ *
+ * Two filters rather than one because they answer different questions. The
+ * floor answers "did this query match anything at all"; the relative cut
+ * answers "which of these is actually the answer", and only it survives the
+ * fact that the distribution's location moves with query and document
+ * length. See the constants for the measurements behind both.
  */
 export function semanticScores(
   index: EmbeddingsFile,
   queryVector: Float32Array,
   opts: SemanticScoreOptions = {},
 ): Map<string, number> {
-  const { floor = DEFAULT_SEMANTIC_FLOOR, topN = DEFAULT_SEMANTIC_CANDIDATES } = opts;
+  const {
+    floor = DEFAULT_SEMANTIC_FLOOR,
+    relativeCut = DEFAULT_SEMANTIC_RELATIVE_CUT,
+    topN = DEFAULT_SEMANTIC_CANDIDATES,
+  } = opts;
   const scored: { path: string; score: number }[] = [];
   for (const [path, entry] of Object.entries(index.notes)) {
     const vector = decodeVector(entry.vector);
@@ -382,5 +421,12 @@ export function semanticScores(
     if (score >= floor) scored.push({ path, score });
   }
   scored.sort((a, b) => b.score - a.score);
-  return new Map(scored.slice(0, topN).map((entry) => [entry.path, entry.score]));
+  const best = scored[0]?.score ?? 0;
+  const threshold = best * relativeCut;
+  return new Map(
+    scored
+      .filter((entry) => entry.score >= threshold)
+      .slice(0, topN)
+      .map((entry) => [entry.path, entry.score]),
+  );
 }
