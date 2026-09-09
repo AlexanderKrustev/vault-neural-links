@@ -40,18 +40,32 @@ const BRIEFING_DEADLINE_MS = 3000;
 const BRIEFING_SECTION_SIZE = 5;
 
 /**
- * Character budget for the briefing half.
+ * The hard cap a client applies to a server's `instructions`, observed
+ * rather than guessed:
  *
- * A real session on a project with long folder paths came back visibly
- * truncated, having cut the branch section and the inbox flag — the two most
- * actionable things in it — because the size had been bounded by note count
- * and note count is not what costs anything: the same five-per-section
- * briefing measured 2,079 characters on one project and 2,771 on another
- * whose paths are twice as long. 1,800 leaves room for the static half inside
- * whatever the client is willing to carry, and `formatBriefing` drops whole
- * sections from the least-actionable end to fit, saying what it dropped.
+ *   MCP server "vault-neural-link": Server instructions truncated
+ *     from 2285 to 2048 chars
+ *
+ * from `claude --debug` at session start. The same 2048 appears against tool
+ * descriptions elsewhere in that log, so it is a general limit on
+ * server-supplied text rather than anything specific to this server.
+ *
+ * The first attempt budgeted only the briefing half, at 1,800, which still
+ * overran once the static half was prepended — so the client cut it, and what
+ * it cut was the end. Budgeting anything less than the whole string is
+ * budgeting the wrong thing.
  */
-const BRIEFING_MAX_CHARS = 1800;
+const CLIENT_INSTRUCTIONS_LIMIT = 2048;
+
+/**
+ * Left free below the cap. A limit met exactly is a limit exceeded by the
+ * next word added to the prose above, and the failure mode is silent
+ * truncation of whatever happens to be last.
+ */
+const INSTRUCTIONS_SAFETY_MARGIN = 48;
+
+/** Separates the static half from the briefing. */
+const INSTRUCTIONS_SEPARATOR = "\n\n---\n\n";
 
 /**
  * What the server says about itself, independent of any vault content. This
@@ -93,7 +107,15 @@ export async function buildServerInstructions(
   // A briefing that matched no project is a list of whatever the vault
   // touched most recently, which is noise in front of every session — so the
   // project half waits until it has something to say about *this* project.
-  if (briefing.project) parts.push(formatBriefing(briefing, { maxChars: BRIEFING_MAX_CHARS }));
+  // Whatever the static half and the separator do not use is what the
+  // briefing gets — computed rather than fixed, so editing the prose above
+  // can never silently push the whole string past the cap.
+  const budget =
+    CLIENT_INSTRUCTIONS_LIMIT -
+    INSTRUCTIONS_SAFETY_MARGIN -
+    STATIC_INSTRUCTIONS.length -
+    INSTRUCTIONS_SEPARATOR.length;
+  if (briefing.project) parts.push(formatBriefing(briefing, { maxChars: Math.max(budget, 0) }));
 
   // The inbox flag is deliberately outside that condition. It is the one
   // thing here that is true of the vault rather than of the project, and the
@@ -109,7 +131,7 @@ export async function buildServerInstructions(
     );
   }
 
-  return parts.join("\n\n---\n\n");
+  return parts.join(INSTRUCTIONS_SEPARATOR);
 }
 
 /**

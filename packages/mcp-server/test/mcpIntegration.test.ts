@@ -209,6 +209,36 @@ describe("MCP client integration (VNL-007)", () => {
       expect(instructions).toContain("/process-inbox");
     });
 
+    // The client truncates server instructions at 2048 characters. Observed,
+    // not guessed — `claude --debug` at session start printed:
+    //   MCP server "vault-neural-link": Server instructions truncated
+    //     from 2285 to 2048 chars
+    // Anything past that is cut from the end, which is where the briefing
+    // is, so overrunning silently costs exactly the content this feature
+    // exists to deliver.
+    it("stays inside the 2048-character limit the client imposes", async () => {
+      // A project with deep folders and long note names — the shape that
+      // overran in the first place.
+      for (let i = 0; i < 10; i++) {
+        await client.callTool({
+          name: "create_note",
+          arguments: {
+            path: `Widgets/A Deliberately Long Folder Name/Note Number ${i} With A Long Descriptive Title`,
+            frontmatter: {},
+            body: "text",
+          },
+        });
+      }
+
+      const instructions = await buildServerInstructions(makeToolContext(vaultPath, "x"), {
+        cwd: "/somewhere/widgets",
+      });
+
+      expect(instructions.length).toBeLessThanOrEqual(2048);
+      // And it is not merely short because the briefing was dropped whole.
+      expect(instructions).toContain("Vault briefing");
+    });
+
     it("survives a vault it cannot read, rather than failing to start", async () => {
       const missing = join(tmpdir(), "vnl-does-not-exist-", String(Date.now()));
       const instructions = await buildServerInstructions(makeToolContext(missing, "x"));
