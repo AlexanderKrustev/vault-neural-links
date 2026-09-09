@@ -418,6 +418,99 @@ describe("recall", () => {
       expect(result.hits[0].path).toBe("Kill Process By Port");
     });
 
+    // --- VNL-061: semantic hits as spreading-activation origins ------------
+    it("expands the graph out of a semantically-found note when no query term matches anything", async () => {
+      // The query shares no word with any note in the vault, so the lexical
+      // axis produces no seeds at all. Before VNL-061 the graph phase had
+      // nothing to spread from and contributed nothing — on precisely the
+      // query embeddings exist to answer.
+      await note("Terminate A Listening Service", "Stop whatever holds a socket open. See [[Socket Teardown Notes]].");
+      await note("Socket Teardown Notes", "Wording with nothing in common with the query.");
+      await note("Gardening", "Tomatoes need water.");
+      await rebuildContentIndex(vaultPath, dataDir);
+      await rebuildStructuralIndex(vaultPath, dataDir);
+
+      const embeddingProvider = provider({
+        "kill process by port": [1, 0, 0],
+        "Terminate A Listening Service": [0.98, 0.2, 0],
+      });
+      await buildEmbeddings(embeddingProvider, [
+        { id: "Terminate A Listening Service", body: "Stop whatever holds a socket open." },
+        { id: "Socket Teardown Notes", body: "Wording with nothing in common with the query." },
+        { id: "Gardening", body: "Tomatoes need water." },
+      ]);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", { embeddingProvider });
+
+      expect(result.seeds).toContain("Terminate A Listening Service");
+      const neighbour = result.hits.find((hit) => hit.path === "Socket Teardown Notes");
+      expect(neighbour).toBeDefined();
+      expect(neighbour!.why.via).toBe("Terminate A Listening Service");
+      expect(neighbour!.why.lexicalScore).toBe(0);
+    });
+
+    it("still labels the semantically-found note itself 'semantic', not 'graph'", async () => {
+      // It self-activates as a seed, so it always carries graph energy now.
+      // That energy is downstream of the semantic match, not evidence of its
+      // own — crediting it to the graph would name the wrong mechanism.
+      await note("Terminate A Listening Service", "Stop whatever holds a socket open.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const embeddingProvider = provider({
+        "kill process by port": [1, 0, 0],
+        "Terminate A Listening Service": [0.98, 0.2, 0],
+      });
+      await buildEmbeddings(embeddingProvider, [
+        { id: "Terminate A Listening Service", body: "Stop whatever holds a socket open." },
+      ]);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", { embeddingProvider });
+
+      expect(result.hits[0].path).toBe("Terminate A Listening Service");
+      expect(result.hits[0].source).toBe("semantic");
+    });
+
+    it("seeds lexically only when semanticSeedCount is 0", async () => {
+      await note("Terminate A Listening Service", "Stop whatever holds a socket open. See [[Socket Teardown Notes]].");
+      await note("Socket Teardown Notes", "Wording with nothing in common with the query.");
+      await rebuildContentIndex(vaultPath, dataDir);
+      await rebuildStructuralIndex(vaultPath, dataDir);
+
+      const embeddingProvider = provider({
+        "kill process by port": [1, 0, 0],
+        "Terminate A Listening Service": [0.98, 0.2, 0],
+      });
+      await buildEmbeddings(embeddingProvider, [
+        { id: "Terminate A Listening Service", body: "Stop whatever holds a socket open." },
+        { id: "Socket Teardown Notes", body: "Wording with nothing in common with the query." },
+      ]);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", {
+        embeddingProvider,
+        semanticSeedCount: 0,
+      });
+
+      expect(result.seeds).toEqual([]);
+      expect(result.hits.find((hit) => hit.path === "Socket Teardown Notes")).toBeUndefined();
+    });
+
+    it("does not seed the same note twice when both axes find it", async () => {
+      await note("Kill Process By Port", "Use lsof to find the process listening on a port and kill it.");
+      await rebuildContentIndex(vaultPath, dataDir);
+
+      const embeddingProvider = provider({
+        "kill process by port": [1, 0, 0],
+        "Kill Process By Port": [1, 0, 0],
+      });
+      await buildEmbeddings(embeddingProvider, [
+        { id: "Kill Process By Port", body: "Use lsof to find the process listening on a port and kill it." },
+      ]);
+
+      const result = await recall(vaultPath, dataDir, "kill process by port", { embeddingProvider });
+
+      expect(result.seeds).toEqual(["Kill Process By Port"]);
+    });
+
     it("degrades to the pre-VNL-051 ranking when the model throws", async () => {
       await note("Kill Process By Port", "lsof and kill.");
       await rebuildContentIndex(vaultPath, dataDir);

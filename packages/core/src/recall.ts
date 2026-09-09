@@ -72,6 +72,15 @@ const DEFAULT_TERM_WEIGHT = 0.4;
  * position; VNL-020 sweeps it.
  */
 const DEFAULT_SEMANTIC_WEIGHT = 0.6;
+/**
+ * How many semantic hits may also become spreading-activation origins
+ * (VNL-061). Fewer than the lexical `seedCount` on purpose: a semantic hit
+ * is a softer claim than a term match — measured against the real vault,
+ * every cosine including the correct answer's lands in a narrow 0.19-0.46
+ * band — and each origin costs a full activation pass against the shared
+ * `budgetMs`. Set to 0 to restore the pre-VNL-061 lexical-only seeding.
+ */
+const DEFAULT_SEMANTIC_SEED_COUNT = 2;
 /** Wall-clock bound on the whole graph-expansion phase (all seeds together). */
 const DEFAULT_GRAPH_BUDGET_MS = 1000;
 /** Characters of body returned per hit so the agent needn't call read_note to triage. */
@@ -211,6 +220,11 @@ export interface RecallOptions {
   semanticRelativeCut?: number;
   /** How many semantic hits may enter the blend (default 20). */
   semanticCandidates?: number;
+  /**
+   * How many semantic hits may also seed spreading activation (VNL-061,
+   * default 2). 0 restores lexical-only seeding.
+   */
+  semanticSeedCount?: number;
   /**
    * The embedding index to score against. Omitted, it is loaded from
    * `vaultDataDir` — absent file means the vault never opted in and the
@@ -479,6 +493,63 @@ async function semanticPhase(
   }
 }
 
+/** A spreading-activation origin, with the energy share it has earned. */
+interface Seed {
+  path: string;
+  /**
+   * Share of the best score on this seed's own axis, discounted by
+   * `semanticWeight` for a semantic seed. Comparable across axes; the raw
+   * per-axis scores are not.
+   */
+  strength: number;
+  /** Which axis nominated it — reported so `why.via` can be traced back to a mechanism. */
+  origin: "lexical" | "semantic";
+}
+
+/**
+ * The origins for the graph phase, drawn from both retrieval axes (VNL-061).
+ *
+ * Lexical seeds come first and keep their existing behaviour exactly.
+ * Semantic seeds are appended, skipping any note the lexical axis already
+ * nominated — a note both axes found is one seed with lexical strength, not
+ * two spreads from the same place.
+ *
+ * Fewer semantic seeds than lexical ones by default: a semantic hit is a
+ * softer claim (see DEFAULT_SEMANTIC_SEED_COUNT), and each additional origin
+ * costs a full spreading-activation pass against the shared time budget.
+ */
+function buildSeeds(
+  scored: ScoredNote[],
+  semantic: Map<string, number>,
+  opts: { seedCount: number; semanticSeedCount: number; semanticWeight: number },
+): Seed[] {
+  const maxLexical = scored[0]?.score ?? 0;
+  const seeds: Seed[] = scored.slice(0, opts.seedCount).map((entry) => ({
+    path: entry.note.path,
+    strength: maxLexical > 0 ? entry.score / maxLexical : 0,
+    origin: "lexical" as const,
+  }));
+
+  if (opts.semanticSeedCount <= 0 || opts.semanticWeight <= 0 || semantic.size === 0) return seeds;
+
+  const taken = new Set(seeds.map((seed) => seed.path));
+  const ranked = [...semantic.entries()].sort((a, b) => b[1] - a[1]);
+  const maxSemantic = ranked[0]?.[1] ?? 0;
+
+  let added = 0;
+  for (const [path, score] of ranked) {
+    if (added >= opts.semanticSeedCount) break;
+    if (taken.has(path)) continue;
+    added++;
+    seeds.push({
+      path,
+      strength: maxSemantic > 0 ? opts.semanticWeight * (score / maxSemantic) : 0,
+      origin: "semantic",
+    });
+  }
+  return seeds;
+}
+
 export async function recall(
   vaultPath: string,
   vaultDataDir: string,
@@ -498,6 +569,7 @@ export async function recall(
     semanticFloor = DEFAULT_SEMANTIC_FLOOR,
     semanticRelativeCut = DEFAULT_SEMANTIC_RELATIVE_CUT,
     semanticCandidates = DEFAULT_SEMANTIC_CANDIDATES,
+    semanticSeedCount = DEFAULT_SEMANTIC_SEED_COUNT,
     embeddings,
     embeddingProvider,
     budgetMs = DEFAULT_GRAPH_BUDGET_MS,
@@ -582,8 +654,26 @@ export async function recall(
   });
 
   // --- Graph phase ---------------------------------------------------------
-  const seeds = scored.slice(0, seedCount);
-  const seedTotal = seeds.reduce((sum, seed) => sum + seed.score, 0);
+  // Origins come from both retrieval axes (VNL-061). Taking them from the
+  // lexical top-N alone meant that on a query whose words appear nowhere in
+  // the vault — exactly the query the semantic axis exists to answer —
+  // there were no seeds at all and the graph contributed nothing, so the two
+  // mechanisms ran side by side instead of compounding.
+  //
+  // The two axes' raw scores are not comparable (BM25 is unbounded, cosine
+  // against real notes lands in a narrow 0.19-0.46 band), so each seed's
+  // strength is its share of the best score *on its own axis*, and semantic
+  // strengths are then scaled by `semanticWeight` — the same discount the
+  // blend applies, for the same reason: a note found on meaning alone is
+  // weaker evidence than one the query's words actually hit, so it should
+  // spread less far.
+  //
+  // Because each axis is normalized against its own maximum, a query with no
+  // semantic seeds distributes energy exactly as it did before this change:
+  // dividing every lexical score by the same constant leaves the shares
+  // untouched.
+  const seeds = buildSeeds(scored, semantic, { seedCount, semanticSeedCount, semanticWeight });
+  const seedTotal = seeds.reduce((sum, seed) => sum + seed.strength, 0);
   const deadline = Date.now() + budgetMs;
 
   interface GraphHit {
@@ -601,9 +691,9 @@ export async function recall(
       timedOut = true;
       break;
     }
-    // Energy proportional to the seed's share of the lexical score, so a
-    // weak third seed doesn't spread as far as the best match does.
-    const share = seedTotal > 0 ? seed.score / seedTotal : 1 / Math.max(seeds.length, 1);
+    // Energy proportional to the seed's share of the total, so a weak third
+    // seed doesn't spread as far as the best match does.
+    const share = seedTotal > 0 ? seed.strength / seedTotal : 1 / Math.max(seeds.length, 1);
     const originEnergy = seedEnergy * share;
 
     // The origin of a spread keeps its own activation. Without this a seed
@@ -614,13 +704,13 @@ export async function recall(
     // energy outward than it started with, so this also makes the origin the
     // graph-axis maximum for its own neighborhood rather than an arbitrary
     // extra boost.
-    const self = graph.get(seed.note.path);
+    const self = graph.get(seed.path);
     if (self) self.energy += originEnergy;
-    else graph.set(seed.note.path, { energy: originEnergy });
+    else graph.set(seed.path, { energy: originEnergy });
 
     const activated = await activate(
       vaultDataDir,
-      seed.note.path,
+      seed.path,
       originEnergy,
       activationConfig,
       vaultPath,
@@ -638,10 +728,10 @@ export async function recall(
         existing.energy += node.energy;
         if (existing.hops === undefined || node.hops < existing.hops) {
           existing.hops = node.hops;
-          existing.via = seed.note.path;
+          existing.via = seed.path;
         }
       } else {
-        graph.set(node.path, { energy: node.energy, via: seed.note.path, hops: node.hops });
+        graph.set(node.path, { energy: node.energy, via: seed.path, hops: node.hops });
       }
     }
   }
@@ -691,15 +781,21 @@ export async function recall(
       // actually handled — so what arrives here is a survivor of that cut,
       // and its raw magnitude only modulates a signal already judged real.
       const semanticNorm = semanticHit ?? 0;
+      // Semantic is checked before graph, not after (VNL-061). Once a
+      // semantic hit can seed spreading activation, it self-activates and so
+      // always carries graph energy — labelling that "graph" would credit
+      // the mechanism that echoed the find to the mechanism that made it.
+      // The graph energy on such a note is downstream of the semantic
+      // match: without it the note would never have been an origin.
       const source: RecallHit["source"] =
         lexical && graphHit
           ? "both"
           : lexical
             ? "lexical"
-            : graphHit
-              ? "graph"
-              : semanticHit !== undefined
-                ? "semantic"
+            : semanticHit !== undefined
+              ? "semantic"
+              : graphHit
+                ? "graph"
                 : "term";
       return {
         path,
@@ -756,7 +852,7 @@ export async function recall(
   return {
     query,
     hits,
-    seeds: seeds.map((seed) => seed.note.path),
+    seeds: seeds.map((seed) => seed.path),
     candidatesScored: candidates.length,
     timedOut,
   };
