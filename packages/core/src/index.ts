@@ -39,6 +39,19 @@ export {
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 export { buildContentIndex, loadContentIndex, rebuildContentIndex, candidatesFromIndex } from "./contentIndex.js";
 export {
+  BENCHMARK_CONDITIONS,
+  DEFAULT_BENCHMARK_TOP_K,
+  formatBenchmarkReport,
+  relatedNoteFor,
+  runBenchmark,
+  type BenchmarkCondition,
+  type BenchmarkOptions,
+  type BenchmarkQuery,
+  type BenchmarkReport,
+  type ConditionMetrics,
+  type QueryOutcome,
+} from "./benchmark.js";
+export {
   DEFAULT_EMBEDDING_MODEL,
   DEFAULT_EMBEDDING_NOTE_LIMIT,
   EMBEDDINGS_FILE_NAME,

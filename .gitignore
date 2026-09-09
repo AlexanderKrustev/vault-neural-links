@@ -11,3 +11,6 @@ packages/desktop-app/sample-okf-large/
 # runtime data (per spec: single source of truth is a generated file, not checked in)
 data/events/*.jsonl
 data/link-weights.json
+
+# gitignored: contains real vault paths from a private vault
+data/benchmark-queries.local.json

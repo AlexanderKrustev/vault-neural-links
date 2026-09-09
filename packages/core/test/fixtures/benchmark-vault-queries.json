@@ -1,0 +1,102 @@
+[
+  {
+    "query": "log rotation policy",
+    "target": "Ops/Log Rotation Setup",
+    "label": "direct title match"
+  },
+  {
+    "query": "certificate renewal runbook",
+    "target": "Ops/Certificate Renewal Runbook",
+    "label": "direct title match"
+  },
+  {
+    "query": "knife sharpening angles",
+    "target": "Kitchen/Knife Sharpening Angles",
+    "label": "direct title match"
+  },
+  {
+    "query": "how long to simmer stock made from bones",
+    "target": "Kitchen/Stock From Bones",
+    "label": "body match"
+  },
+  {
+    "query": "how often should a backup actually be restored",
+    "target": "Ops/Backup Restore Drill",
+    "label": "body match"
+  },
+  {
+    "query": "kill the process holding a port",
+    "target": "Ops/Freeing A Held Socket",
+    "label": "synonym; 'Port Numbering Conventions' is the lexical distractor"
+  },
+  {
+    "query": "stop whatever is occupying an address so the app can boot",
+    "target": "Ops/Freeing A Held Socket",
+    "label": "synonym, no shared content word"
+  },
+  {
+    "query": "reduce spiciness of a dish",
+    "target": "Kitchen/Killing The Heat In A Curry",
+    "label": "synonym; the word 'killing' should not pull the ops notes"
+  },
+  {
+    "query": "dough that needs no working by hand",
+    "target": "Kitchen/Bread Without Kneading",
+    "label": "synonym"
+  },
+  {
+    "query": "end one database session without dropping the others",
+    "target": "Ops/Killing A Runaway Query",
+    "label": "synonym"
+  },
+  {
+    "query": "what did we decide about charging money",
+    "target": "Product/Free First Then Paid",
+    "label": "supersession: must beat the note it replaced"
+  },
+  {
+    "query": "why did we stop the standalone client",
+    "target": "Product/Pausing The Desktop Client",
+    "label": "decision"
+  },
+  {
+    "query": "who deals with tax and invoicing",
+    "target": "Product/Who Handles The Invoices",
+    "label": "decision"
+  },
+  {
+    "query": "what are we allowed to claim publicly",
+    "target": "Product/What We Say In Public",
+    "label": "decision"
+  },
+  {
+    "query": "which number tells us the thing is useful",
+    "target": "Product/Measuring Whether It Helped",
+    "label": "decision, phrased nothing like the note"
+  },
+  {
+    "query": "why would a service refuse to start",
+    "target": "Ops/Service Will Not Start",
+    "label": "hub note"
+  },
+  {
+    "query": "the volume filled up because of logging",
+    "target": "Ops/Disk Filled Up Postmortem",
+    "label": "body match"
+  },
+  {
+    "query": "feeding schedule for a sourdough culture",
+    "target": "Kitchen/Keeping A Starter Alive",
+    "label": "synonym"
+  },
+  {
+    "query": "privileged port range",
+    "target": "Ops/Port Numbering Conventions",
+    "label": "trap in reverse: here the lexical note IS correct"
+  },
+  {
+    "query": "the process of assigning ports to services",
+    "target": "Ops/Port Numbering Conventions",
+    "label": "shares 'process' and 'port' with the socket note, which is wrong here"
+  }
+]
