@@ -349,6 +349,7 @@ export const ablationDiffTool = {
           importance: z.boolean().optional(),
           consolidation: z.boolean().optional(),
           structuralFallback: z.boolean().optional(),
+          coldStartSeed: z.boolean().optional(),
         })
         .describe("Which layers to turn off for the ablated run (true = disable that layer). Unset layers stay enabled."),
       energy: z.number().positive().optional().describe("Starting energy at the origin note (default 10)"),

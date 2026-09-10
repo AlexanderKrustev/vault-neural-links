@@ -376,6 +376,88 @@ export const DEFAULT_STRUCTURAL_FALLBACK_CONFIG: StructuralFallbackConfig = {
   floorWeight: 0.1,
 };
 
+/**
+ * VNL-021 (D9) cold-start seeding. A vault that has just installed the
+ * engine has no usage history at all, so every structural-only neighbor
+ * gets the same flat `floorWeight` above and the graph can order nothing —
+ * the differentiator cannot differentiate until months of traversals exist.
+ * These priors give a wikilink an opening weight derived from evidence that
+ * is already on disk on day one: whether the link is reciprocated, how
+ * specific the target is, and how recently the target was edited.
+ *
+ * Three properties are deliberate, and each is a constraint the
+ * implementation has to keep:
+ *
+ * - **A prior is never a measurement.** Seeds live in their own
+ *   `seed-weights.json`, never in `link-weights.json`, for the same reason
+ *   VNL-053 kept term weights separate: folding a guess into the usage graph
+ *   would corrupt every future `zeroUsage` ablation and make VNL-022's
+ *   month-6 verdict unanswerable.
+ * - **Additive to the floor, never below it.** The seeded weight is
+ *   `floorWeight + bonus`, so the worst case is exactly today's behaviour and
+ *   the change can only reorder structural-only candidates among themselves.
+ *   VNL-058 measured the flat floor as the one load-bearing layer; this must
+ *   not be able to erode it.
+ * - **Short half-life, so real traversal wins quickly.** A pair that has any
+ *   usage edge never consults the seed at all (the usage tier already
+ *   shadows the structural one), and the bonus itself fades on a half-life
+ *   well under the 30-day usage default, so an untouched guess stops
+ *   competing on its own.
+ *
+ * The numbers below are an opening position, not a measurement — VNL-020 is
+ * where they are earned or changed (D6).
+ */
+export interface ColdStartSeedConfig {
+  /**
+   * Ceiling for the prior, before specificity and recency scale it down.
+   * Set level with `floorWeight`, so the strongest possible seed doubles a
+   * structural candidate's weight and the weakest leaves it untouched —
+   * still an order of magnitude below a single usage touch (~1), because a
+   * prior must never outrank something a human or agent actually did.
+   */
+  maxBonus: number;
+  /**
+   * Half-life, in days, of the recency component, measured from the target
+   * note's file mtime. Shorter than DEFAULT_DECAY_CONFIG's 30 on purpose:
+   * "this area of the vault is being worked on right now" is a claim with a
+   * short shelf life.
+   */
+  halfLifeDays: number;
+  /**
+   * Multiplier for a link that is not reciprocated. A mutual link is two
+   * independent authoring decisions and much stronger evidence of a real
+   * relationship than one note mentioning another in passing.
+   */
+  oneWayFactor: number;
+}
+
+export const DEFAULT_COLD_START_SEED_CONFIG: ColdStartSeedConfig = {
+  maxBonus: 0.1,
+  halfLifeDays: 14,
+  oneWayFactor: 0.5,
+};
+
+/** One directed prior: what the seed tier is worth when querying `from` and considering `to`. */
+export interface SeedRecord {
+  /** The undecayed bonus, already scaled by specificity and reciprocity. */
+  strength: number;
+  /** ISO mtime of the `to` note — the timestamp the bonus decays from. */
+  recencyAt: string;
+}
+
+/**
+ * Cold-start priors over structural (wikilink) edges, rebuilt by the nightly
+ * pipeline. Keys are `from|to` and **directional**, unlike
+ * link-weights.json's sorted undirected pairs: within one origin note's
+ * candidate set every candidate shares the origin, so the only thing that
+ * can separate them is the other endpoint — its specificity and its mtime.
+ */
+export interface SeedWeightsFile {
+  version: number;
+  builtAt: string;
+  edges: Record<string, SeedRecord>;
+}
+
 
 /**
  * Which optional scoring layers contribute to a retrieval run — everything
@@ -394,6 +476,13 @@ export interface AblationLayers {
   consolidation: boolean;
   /** Structural-only (no-usage-history) floor-weight fallback neighbors. */
   structuralFallback: boolean;
+  /**
+   * VNL-021 cold-start priors on top of that floor (seedWeights.ts). Nested
+   * under `structuralFallback` in effect: ablating the floor removes the
+   * candidates these priors would have reordered, so this layer can only
+   * matter while the floor is on.
+   */
+  coldStartSeed: boolean;
 }
 
 /**
@@ -406,6 +495,7 @@ export const DEFAULT_ABLATION_LAYERS: AblationLayers = {
   importance: true,
   consolidation: true,
   structuralFallback: true,
+  coldStartSeed: true,
 };
 
 /**
@@ -454,6 +544,31 @@ export const HOT_PATH_ABLATION_LAYERS: AblationLayers = {
   importance: false,
   consolidation: false,
   structuralFallback: true,
+  // VNL-021, measured 2026-09-10 and left OFF on the same rule as importance
+  // and consolidation above: nothing enters the serving path without a lift.
+  //
+  // Real 492-note vault, VNL-020's 70 queries, cold, seeds off vs on in one
+  // process from one baseline: 0.6977 → 0.6977 (maxBonus 0.1, the shipped
+  // calibration), 0.6978 at 0.3 and at 1.0, and 0.6941 at 5.0 — i.e. no
+  // effect until the prior is large enough to start doing damage. Repeated
+  // against a *simulated fresh install* (the same indexes with all usage
+  // history removed, which is the population D9 is about): 0.6998 off,
+  // 0.6998 / 0.7001 / 0.7003 on. Two rank-1 counts identical at 41/70
+  // throughout.
+  //
+  // The mechanism works — a mutual, specific, recently-edited link does
+  // outrank a one-way link to a hub, and the unit tests hold it to that.
+  // It does not matter, because reordering the structural tier reorders
+  // candidates whose energy sits far below the lexical and semantic seeds
+  // that decide the ranking (VNL-020: embeddings carry the win). A prior
+  // over a graph axis that is itself net-neutral cannot be worth more than
+  // the axis.
+  //
+  // Kept, not deleted, and still built nightly: the file is what lets the
+  // same question be asked on someone else's vault — a genuinely new user's,
+  // with a link graph this one no longer resembles — without a code change,
+  // which is exactly what VNL-022's ≥3-vault gate needs.
+  coldStartSeed: false,
 };
 
 /** A named layer difference between two ablation runs, for AIBRAIN-27's before/after diff panel. */

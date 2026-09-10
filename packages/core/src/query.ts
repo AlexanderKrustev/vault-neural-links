@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   AblationLayers,
+  ColdStartSeedConfig,
   EdgeRecord,
   ImportanceConfig,
   LinkWeightsFile,
@@ -10,6 +11,7 @@ import type {
   WeightedNeighbor,
 } from "./types.js";
 import {
+  DEFAULT_COLD_START_SEED_CONFIG,
   DEFAULT_IMPORTANCE_CONFIG,
   DEFAULT_PRIMING_CONFIG,
   DEFAULT_STRUCTURAL_FALLBACK_CONFIG,
@@ -20,6 +22,7 @@ import { parseFrontmatter } from "./frontmatter.js";
 import { loadNoteImportance } from "./importance.js";
 import { primingBonus, type SessionBuffer } from "./priming.js";
 import { readSupersession } from "./relations.js";
+import { liveSeedBonus, loadSeedWeights, seedKey } from "./seedWeights.js";
 import { loadStructuralIndex } from "./structuralLinks.js";
 import { resolveNoteFile } from "./vaultPaths.js";
 
@@ -121,6 +124,7 @@ export async function computeLiveNeighborWeights(
   structuralFallback: StructuralFallbackConfig = DEFAULT_STRUCTURAL_FALLBACK_CONFIG,
   importanceConfig: ImportanceConfig = DEFAULT_IMPORTANCE_CONFIG,
   layers: AblationLayers = HOT_PATH_ABLATION_LAYERS,
+  seedConfig: ColdStartSeedConfig = DEFAULT_COLD_START_SEED_CONFIG,
 ): Promise<WeightedNeighbor[]> {
   const weights = await loadWeights(vaultDataDir);
   const importance = layers.importance ? await loadNoteImportance(vaultDataDir) : null;
@@ -166,9 +170,25 @@ export async function computeLiveNeighborWeights(
   // layers.structuralFallback is false.
   if (layers.structuralFallback) {
     const structural = await loadStructuralIndex(vaultDataDir);
-    for (const other of structural?.edges[note] ?? []) {
+    const structuralNeighbors = structural?.edges[note] ?? [];
+    // VNL-021: on a vault with no traversal history every one of these
+    // candidates has the identical floor weight, so the graph orders
+    // nothing until months of usage exist. The seed tier adds a prior on
+    // top of the floor — reciprocity, target specificity, target recency —
+    // and can only ever raise a candidate, never push one below the floor
+    // VNL-058 measured as load-bearing. Loaded only when the layer is on
+    // and there is something for it to reorder.
+    const seeds =
+      layers.coldStartSeed && structuralNeighbors.length > 0 ? await loadSeedWeights(vaultDataDir) : null;
+    for (const other of structuralNeighbors) {
       if (seen.has(other)) continue;
-      candidates.push({ path: other, baseWeight: structuralFallback.floorWeight, lastTouched: structural!.builtAt, source: "structural" });
+      const bonus = seeds ? liveSeedBonus(seeds.edges[seedKey(note, other)], now, seedConfig) : 0;
+      candidates.push({
+        path: other,
+        baseWeight: structuralFallback.floorWeight + bonus,
+        lastTouched: structural!.builtAt,
+        source: "structural",
+      });
     }
   }
 

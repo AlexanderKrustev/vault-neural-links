@@ -282,6 +282,10 @@ describe("recall", () => {
       expect(HOT_PATH_ABLATION_LAYERS.consolidation).toBe(false);
       // The one layer whose removal is visible: 0.6835 vs 0.6974 MRR.
       expect(HOT_PATH_ABLATION_LAYERS.structuralFallback).toBe(true);
+      // VNL-021's priors measured at no effect on the same 70 queries, both
+      // on the real vault and on a simulated fresh install (0.6977 vs 0.6977,
+      // 0.6998 vs 0.6998), so they stay out of the path on the same rule.
+      expect(HOT_PATH_ABLATION_LAYERS.coldStartSeed).toBe(false);
 
       // The ablation baseline is unchanged and still means "everything on",
       // or `runAblationComparison` would be measuring against the diet
@@ -291,6 +295,7 @@ describe("recall", () => {
         importance: true,
         consolidation: true,
         structuralFallback: true,
+        coldStartSeed: true,
       });
     });
 

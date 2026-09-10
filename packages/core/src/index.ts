@@ -37,6 +37,7 @@ export {
   type PruneResult,
 } from "./sessionFiles.js";
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
+export { buildSeedWeights, loadSeedWeights, rebuildSeedWeights, liveSeedBonus, linkSpecificity, seedKey } from "./seedWeights.js";
 export { buildContentIndex, loadContentIndex, rebuildContentIndex, candidatesFromIndex } from "./contentIndex.js";
 export {
   DEFAULT_BRIEFING_SECTION_SIZE,

@@ -1,5 +1,6 @@
 import { compact } from "./compactor.js";
 import { buildStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
+import { rebuildSeedWeights } from "./seedWeights.js";
 import { buildContentIndex, rebuildContentIndex } from "./contentIndex.js";
 import {
   DEFAULT_EMBEDDING_NOTE_LIMIT,
@@ -20,6 +21,8 @@ export interface NightlyRunResult {
   edgeCount?: number;
   promotedCount?: number;
   structuralEdgeCount?: number;
+  /** VNL-021 cold-start priors written this run. */
+  seedEdgeCount?: number;
   noteCount?: number;
   clusterCount?: number;
   contentIndexTokenCount?: number;
@@ -88,6 +91,10 @@ export async function runNightlyIfStale(
   const nodes = await adapter.listNodes();
   const structuralIndex = await buildStructuralIndex(vaultPath, adapter, nodes);
   const structural = await rebuildStructuralIndex(vaultPath, vaultDataDir, adapter, structuralIndex);
+  // VNL-021: same shared `nodes` pass; the only extra I/O is one stat() per
+  // linked note, so the priors cost a fraction of the index builds either
+  // side of them.
+  const seeds = await rebuildSeedWeights(vaultPath, vaultDataDir, adapter, nodes, { now });
   const contentIndex = await buildContentIndex(vaultPath, adapter, nodes);
   const contentIndexResult = await rebuildContentIndex(vaultPath, vaultDataDir, adapter, contentIndex);
 
@@ -109,6 +116,7 @@ export async function runNightlyIfStale(
     edgeCount: compaction.edgeCount,
     promotedCount: consolidation.promotedCount,
     structuralEdgeCount: structural.edgeCount,
+    seedEdgeCount: seeds.edgeCount,
     noteCount: importance.noteCount,
     clusterCount: clustering.clusterCount,
     contentIndexTokenCount: contentIndexResult.tokenCount,

@@ -27,24 +27,18 @@ export async function buildStructuralIndex(
   // doesn't pay for adapter.listNodes() twice — at 300k-note scale that's a
   // real, previously-measured cost (~17s, AIBRAIN-131), not a rounding error.
   const nodes = prebuiltNodes ?? (await adapter.listNodes());
-
-  const resolver = createNoteResolver(nodes.map((node) => node.id));
-  const resolveTarget = (target: string): string | undefined => resolver.resolve(target);
+  const directed = buildDirectedAdjacency(nodes, adapter);
 
   const adjacency = new Map<string, Set<string>>();
   function addEdge(a: string, b: string): void {
-    if (a === b) return;
     if (!adjacency.has(a)) adjacency.set(a, new Set());
     if (!adjacency.has(b)) adjacency.set(b, new Set());
     adjacency.get(a)!.add(b);
     adjacency.get(b)!.add(a);
   }
 
-  for (const node of nodes) {
-    for (const target of adapter.extractExplicitLinkTargets(node)) {
-      const resolved = resolveTarget(target);
-      if (resolved) addEdge(node.id, resolved);
-    }
+  for (const [from, targets] of directed) {
+    for (const to of targets) addEdge(from, to);
   }
 
   const edges: Record<string, string[]> = {};
@@ -53,6 +47,35 @@ export async function buildStructuralIndex(
   }
 
   return { version: STRUCTURAL_LINKS_FILE_VERSION, builtAt: new Date().toISOString(), edges };
+}
+
+/**
+ * Every note's resolved outgoing links, direction preserved — the shared
+ * step behind both the (symmetric) structural index and VNL-021's seed
+ * priors, which need to know whether a link is reciprocated and therefore
+ * cannot use the symmetrized adjacency above.
+ *
+ * A wikilink target is only resolved when it uniquely identifies one note —
+ * either an exact vault-relative path or an unambiguous title match.
+ * Ambiguous titles (this vault has many notes named "Index" or "CLAUDE"
+ * across different project folders) are dropped rather than guessed at,
+ * since a wrong resolution would silently wire unrelated notes together.
+ * Self-links are dropped: a note is not its own neighbor.
+ */
+export function buildDirectedAdjacency(nodes: SourceNode[], adapter: SourceAdapter): Map<string, Set<string>> {
+  const resolver = createNoteResolver(nodes.map((node) => node.id));
+  const directed = new Map<string, Set<string>>();
+
+  for (const node of nodes) {
+    for (const target of adapter.extractExplicitLinkTargets(node)) {
+      const resolved = resolver.resolve(target);
+      if (!resolved || resolved === node.id) continue;
+      if (!directed.has(node.id)) directed.set(node.id, new Set());
+      directed.get(node.id)!.add(resolved);
+    }
+  }
+
+  return directed;
 }
 
 export async function loadStructuralIndex(vaultDataDir: string): Promise<StructuralLinksFile | null> {

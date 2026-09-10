@@ -88,14 +88,20 @@ describe("mcp-server tools", () => {
     });
     await compactWeightsTool.handler(ctx)({});
 
-    // Visiting B this session (via log_traversal) should prime it; C is
-    // never independently touched despite having the identical base weight.
+    // Visiting B this session (via log_traversal) still records it in the
+    // session buffer, but since VNL-058 that no longer moves its rank: the
+    // founder switched priming out of the serving path on 2026-09-09
+    // because it made the engine repeat what had already been read. Equal
+    // usage weight therefore stays equal, and the buffer shows up as
+    // `why.primed` information rather than as a boost. Priming's own
+    // arithmetic stays covered in core's priming.test.ts, and the layer is
+    // still reachable via `layers`.
     await logTraversalTool.handler(ctx)({ from: "X", to: "B" });
 
     const neighbors = parseResult(await getWeightedNeighborsTool.handler(ctx)({ note: "A" }));
     const b = neighbors.find((n: { path: string }) => n.path === "B");
     const c = neighbors.find((n: { path: string }) => n.path === "C");
-    expect(b.weight).toBeGreaterThan(c.weight);
+    expect(b.weight).toBeCloseTo(c.weight, 5);
   });
 
   it("activate surfaces a two-hop neighbor not directly linked to the origin, with a populated trace", async () => {
@@ -603,10 +609,14 @@ describe("mcp-server tools", () => {
     const compactAfterSearch = await compactWeightsTool.handler(ctx)({});
     expect(parseResult(compactAfterSearch).edgeCount).toBe(2); // unchanged from the 2 seeded edges — search added none
 
+    // As above: the hit is primed in the session buffer, and since VNL-058
+    // that is reported, not scored. What this test is really guarding —
+    // that a search writes no traverse/reinforce event of its own — is the
+    // edgeCount assertion above.
     const neighbors = parseResult(await getWeightedNeighborsTool.handler(ctx)({ note: "A" }));
     const b = neighbors.find((n: { path: string }) => n.path === "B");
     const c = neighbors.find((n: { path: string }) => n.path === "C");
-    expect(b.weight).toBeGreaterThan(c.weight);
+    expect(b.weight).toBeCloseTo(c.weight, 5);
   });
 
   it("create_note skips auto-link/changelog for notes under Templates/", async () => {

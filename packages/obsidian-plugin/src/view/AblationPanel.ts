@@ -10,6 +10,7 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   importance: "PageRank importance",
   consolidation: "Long-term consolidation",
   structuralFallback: "Structural (wikilink) fallback",
+  coldStartSeed: "Cold-start link priors",
 };
 
 /**
