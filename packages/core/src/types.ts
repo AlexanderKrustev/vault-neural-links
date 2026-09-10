@@ -11,7 +11,7 @@ export type EventType = "traverse" | "reinforce" | "decay" | "term";
  * log_traversal's manual-credit escape hatch (AIBRAIN-72), or the human
  * opening one note after another inside Obsidian (VNL-052).
  */
-export type TraversalTrigger = "read" | "manual" | "human-open";
+export type TraversalTrigger = "read" | "manual" | "human-open" | "history-import";
 /**
  * What actually caused a "reinforce" event — an explicit reinforce_link call,
  * AIBRAIN-71's automatic retrieval-then-read correlation, the human
@@ -45,6 +45,24 @@ export interface HumanSignalConfig {
   openWeight: number;
   editWeight: number;
 }
+
+/**
+ * VNL-065: the one-time import of Obsidian's own recently-opened stack
+ * (`workspaceHistory.ts`, D9's second half).
+ *
+ * `importWeight` sits below VNL-052's live `openWeight` of 0.25 because
+ * adjacency in a recently-opened stack is a weaker claim than two opens
+ * observed ten minutes apart: the stack collapses repeats, reorders on
+ * every visit, and carries no timestamps at all. An opening position, not
+ * a measurement.
+ */
+export interface WorkspaceHistoryConfig {
+  importWeight: number;
+}
+
+export const DEFAULT_WORKSPACE_HISTORY_CONFIG: WorkspaceHistoryConfig = {
+  importWeight: 0.15,
+};
 
 export const DEFAULT_HUMAN_SIGNAL_CONFIG: HumanSignalConfig = {
   coOpenWindowMs: 10 * 60 * 1000,
@@ -812,7 +830,8 @@ export interface UsageReportMechanismCounts {
    * apart from the agent's counts above: the two have different volumes and
    * different per-event weights, and mixing them would make both unreadable.
    */
-  human: { opens: number; edits: number };
+  /** VNL-052 live navigation, and VNL-065's one-time import of Obsidian's recently-opened stack kept separate from it — imported adjacency is weaker evidence than an open this machine watched happen. */
+  human: { opens: number; edits: number; historyImported: number };
   /**
    * Term-to-note learning events (VNL-053) — a query's selective terms
    * credited to a note that was read right after search_notes/recall

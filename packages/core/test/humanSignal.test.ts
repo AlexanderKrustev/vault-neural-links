@@ -136,7 +136,7 @@ describe("HumanNavigationTracker (VNL-052)", () => {
       // compaction consumes them (pre-existing behaviour — the report is a
       // "since the last fold" view, not a lifetime total).
       const report = await computeUsageReport(dataDir);
-      expect(report.mechanismCounts.human).toEqual({ opens: 1, edits: 1 });
+      expect(report.mechanismCounts.human).toEqual({ opens: 1, edits: 1, historyImported: 0 });
       // Human activity must not be mistaken for the agent's own traffic.
       expect(report.mechanismCounts.traverse).toBe(0);
       expect(report.mechanismCounts.reinforce).toEqual({ explicit: 0, autoRetrieval: 0, cited: 0 });

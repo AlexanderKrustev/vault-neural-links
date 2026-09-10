@@ -133,7 +133,11 @@ export class UsageReportPanel {
     // above — see computeUsageReport's own reasoning for why the two must
     // stay legible as separate numbers.
     mechanisms.createDiv({
-      text: `your navigation: ${report.mechanismCounts.human.opens} opens / ${report.mechanismCounts.human.edits} edits`,
+      text:
+        `your navigation: ${report.mechanismCounts.human.opens} opens / ${report.mechanismCounts.human.edits} edits` +
+        (report.mechanismCounts.human.historyImported > 0
+          ? ` (+${report.mechanismCounts.human.historyImported} imported from Obsidian history)`
+          : ""),
       cls: "vault-neural-links-usage-line",
     });
 

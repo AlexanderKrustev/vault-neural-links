@@ -54,6 +54,16 @@ now, not just what's technically connected.
   your own vault. No note content, no network calls, nothing sent anywhere,
   no telemetry. Turn it off in the plugin's settings ("Learn from my
   navigation"), or delete the folder to erase it.
+
+  A command, **"Import Obsidian's recently-opened history into the
+  graph"**, seeds this from the history Obsidian already keeps, so a fresh
+  install is not starting from nothing. Be clear on how much that is:
+  Obsidian's recently-opened list holds a few dozen paths per machine with
+  **no timestamps** — on the vault this was built against, 77 note pairs.
+  They are logged at a lower weight than navigation the plugin actually
+  watched, marked as imported so they can be told apart, and read from
+  `.obsidian/workspace*.json` inside your own vault. Nothing leaves the
+  machine, and running the command twice does not double-count.
 - **Optional: matches meaning, not just words** — off by default. With the
   optional `@huggingface/transformers` package installed, the nightly job
   embeds each note locally (all-MiniLM-L6-v2, ONNX, CPU) and `recall` blends

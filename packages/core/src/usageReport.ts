@@ -80,6 +80,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
   let reinforceCitedCount = 0;
   let humanOpenCount = 0;
   let humanEditCount = 0;
+  let historyImportCount = 0;
   let termSearchReadCount = 0;
   let termRecallReadCount = 0;
   let searchCount = 0;
@@ -118,7 +119,11 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
         else termSearchReadCount++;
         continue;
       }
-      if (event.trigger === "human-open") humanOpenCount++;
+      // VNL-065: imported history is human signal, but it is retroactive
+      // and timestamp-less, so it is counted apart from what the sensor
+      // actually observed rather than inflating the live open count.
+      if (event.trigger === "history-import") historyImportCount++;
+      else if (event.trigger === "human-open") humanOpenCount++;
       else if (event.trigger === "human-edit") humanEditCount++;
       else if (event.type === "traverse") traverseCount++;
       else if (event.type === "reinforce") {
@@ -217,7 +222,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
     mechanismCounts: {
       traverse: traverseCount,
       reinforce: { explicit: reinforceExplicitCount, autoRetrieval: reinforceAutoCount, cited: reinforceCitedCount },
-      human: { opens: humanOpenCount, edits: humanEditCount },
+      human: { opens: humanOpenCount, edits: humanEditCount, historyImported: historyImportCount },
       termLearn: { searchRead: termSearchReadCount, recallRead: termRecallReadCount },
       activate: activateTierCounts,
       getWeightedNeighbors: getWeightedNeighborsCount,

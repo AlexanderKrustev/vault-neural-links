@@ -1,4 +1,5 @@
-import { Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { importWorkspaceHistory, resolveDataDir } from "@vault-neural-links/core";
 import { VaultNeuralLinksSettingTab } from "./SettingTab.js";
 import { DEFAULT_SETTINGS, type VaultNeuralLinksSettings } from "./settings.js";
 import { NEURAL_GRAPH_VIEW_TYPE, NeuralGraphView } from "./view/NeuralGraphView.js";
@@ -32,6 +33,21 @@ export default class VaultNeuralLinksPlugin extends Plugin {
       },
     });
 
+    // VNL-065: D9's other half — Obsidian already remembers which notes
+    // you opened one after another, from before this plugin existed. It is
+    // a command rather than something that runs on load: it writes to the
+    // event log, it is not undoable short of editing that log, and how much
+    // history exists is a fact about the user's vault they should see the
+    // number for. Safe to run twice; a marker records which pairs were
+    // credited, so a later run imports only what is new.
+    this.addCommand({
+      id: "import-obsidian-history",
+      name: "Import Obsidian's recently-opened history into the graph",
+      callback: () => {
+        void this.importObsidianHistory();
+      },
+    });
+
     // Sole trigger for the daily compact/consolidate/reindex/importance/
     // cluster pipeline (AIBRAIN-46) — no OS scheduled task, no Claude Code /
     // MCP-server-startup trigger. See NightlyScheduler for the idempotency
@@ -45,6 +61,34 @@ export default class VaultNeuralLinksPlugin extends Plugin {
     // same vault produces far more. Writes to the same local event log, and
     // nothing leaves the machine.
     this.startHumanActivityWatcher();
+  }
+
+  /**
+   * Runs the one-time history import and reports what it actually found.
+   * The count matters: `lastOpenFiles` is a recently-opened stack of a few
+   * dozen paths with no timestamps, not a log of months of navigation, and
+   * a user told "imported" without a number would reasonably assume the
+   * latter.
+   */
+  private async importObsidianHistory(): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) {
+      new Notice("Vault Neural Links: history import needs desktop Obsidian.");
+      return;
+    }
+
+    const vaultPath = adapter.getBasePath();
+    try {
+      const result = await importWorkspaceHistory(vaultPath, resolveDataDir(vaultPath), { force: true });
+      new Notice(
+        result.eventCount === 0
+          ? `Vault Neural Links: nothing new to import (${result.pairCount} pairs already credited).`
+          : `Vault Neural Links: imported ${result.eventCount} note pairs from ${result.sources.length} workspace file(s). ` +
+            "They count as weak human signal and are folded in at the next nightly run.",
+      );
+    } catch (err) {
+      new Notice(`Vault Neural Links: history import failed — ${(err as Error).message}`);
+    }
   }
 
   onunload(): void {

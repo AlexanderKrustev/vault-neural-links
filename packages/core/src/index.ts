@@ -38,6 +38,8 @@ export {
 } from "./sessionFiles.js";
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
 export { clearIndexCache, invalidateCachedFile } from "./indexCache.js";
+export { historyPairs, importWorkspaceHistory } from "./workspaceHistory.js";
+export type { WorkspaceHistoryImport, ImportWorkspaceHistoryOptions } from "./workspaceHistory.js";
 export { buildSeedWeights, loadSeedWeights, rebuildSeedWeights, liveSeedBonus, linkSpecificity, seedKey } from "./seedWeights.js";
 export { buildContentIndex, loadContentIndex, rebuildContentIndex, candidatesFromIndex } from "./contentIndex.js";
 export {
