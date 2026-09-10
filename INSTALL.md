@@ -146,20 +146,22 @@ Same as step 2 above: `setx CLAUDE_VAULT_PATH "C:\path\to\your\vault"`.
 ### 5. Build and install the Obsidian plugin
 
 ```powershell
-cd packages\obsidian-plugin
-node esbuild.config.mjs production
+npm run deploy --workspace=packages/obsidian-plugin
 ```
 
-Copy the built files into the vault's plugin folder:
-
-```powershell
-$dest = "C:\path\to\your\vault\.obsidian\plugins\vault-neural-links"
-New-Item -ItemType Directory -Force $dest
-Copy-Item manifest.json,main.js,styles.css $dest
-```
+That builds the plugin and copies `main.js`, `manifest.json` and
+`styles.css` into
+`$env:CLAUDE_VAULT_PATH\.obsidian\plugins\vault-neural-links`, creating the
+folder if it is not there. To deploy somewhere else, name it:
+`npm run deploy --workspace=packages/obsidian-plugin -- "C:\other\vault"`.
 
 In Obsidian: **Settings → Community plugins** → turn off Restricted mode
 (if on) → enable **Vault Neural Links**.
+
+After any later rebuild, run `deploy` again **and reload the plugin**
+(toggle it off and on, or Ctrl+P → "Reload app without saving") — Obsidian
+holds the old bundle in memory, and `npm run build` on its own never
+touches the vault at all.
 
 ### 6. Nightly pipeline
 

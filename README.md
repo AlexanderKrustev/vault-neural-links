@@ -137,14 +137,23 @@ AIBRAIN-39, a manual review process once submitted) — for now, build it
 yourself:
 
 ```bash
-npm run build --workspace=packages/obsidian-plugin
+npm run deploy --workspace=packages/obsidian-plugin
 ```
 
-Then copy `manifest.json`, `styles.css`, and the generated `main.js` (all
-in `packages/obsidian-plugin/`) into
-`<your-vault>/.obsidian/plugins/vault-neural-links/`, and enable "Vault
-Neural Links" under Community Plugins in Obsidian. Open the view via the
-ribbon icon or the "Open Neural Graph" command.
+That builds it and copies `main.js`, `manifest.json` and `styles.css`
+into `<your-vault>/.obsidian/plugins/vault-neural-links/`, taking the
+vault from `CLAUDE_VAULT_PATH` (or `-- <vault path>` if you'd rather say
+it outright). It keeps one dated backup of the `main.js` it replaces, and
+says nothing changed when nothing did.
+
+Then enable "Vault Neural Links" under Community Plugins in Obsidian, and
+open the view via the ribbon icon or the "Open Neural Graph" command.
+
+**Deploying is not loading.** Obsidian keeps the running bundle in
+memory, so after every deploy toggle the plugin off and on (or Ctrl+P →
+"Reload app without saving"). `npm run build` on its own only writes into
+the repo and changes nothing in the vault — which is exactly how an
+installed plugin ends up six days behind the code.
 
 ## Tools
 
