@@ -1,9 +1,10 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { ImportanceConfig, ImportanceResult, NoteImportanceFile, StructuralLinksFile } from "./types.js";
 import { DEFAULT_IMPORTANCE_CONFIG } from "./types.js";
 import { loadStructuralIndex } from "./structuralLinks.js";
+import { invalidateCachedFile, loadCachedJson } from "./indexCache.js";
 
 const NOTE_IMPORTANCE_FILE_VERSION = 1;
 const NOTE_IMPORTANCE_FILE_NAME = "note-importance.json";
@@ -73,13 +74,7 @@ export function normalizeImportance(rawScores: Record<string, number>): Record<s
 }
 
 export async function loadNoteImportance(vaultDataDir: string): Promise<NoteImportanceFile | null> {
-  try {
-    const content = await readFile(join(vaultDataDir, NOTE_IMPORTANCE_FILE_NAME), "utf8");
-    return JSON.parse(content) as NoteImportanceFile;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
+  return loadCachedJson<NoteImportanceFile>(join(vaultDataDir, NOTE_IMPORTANCE_FILE_NAME));
 }
 
 async function persistNoteImportance(vaultDataDir: string, file: NoteImportanceFile): Promise<void> {
@@ -88,6 +83,7 @@ async function persistNoteImportance(vaultDataDir: string, file: NoteImportanceF
   const tmpPath = join(vaultDataDir, `.${NOTE_IMPORTANCE_FILE_NAME}.${randomUUID()}.tmp`);
   await writeFile(tmpPath, JSON.stringify(file, null, 2), "utf8");
   await rename(tmpPath, targetPath);
+  invalidateCachedFile(targetPath);
 }
 
 /**

@@ -37,6 +37,7 @@ export {
   type PruneResult,
 } from "./sessionFiles.js";
 export { buildStructuralIndex, loadStructuralIndex, rebuildStructuralIndex } from "./structuralLinks.js";
+export { clearIndexCache, invalidateCachedFile } from "./indexCache.js";
 export { buildSeedWeights, loadSeedWeights, rebuildSeedWeights, liveSeedBonus, linkSpecificity, seedKey } from "./seedWeights.js";
 export { buildContentIndex, loadContentIndex, rebuildContentIndex, candidatesFromIndex } from "./contentIndex.js";
 export {
@@ -96,7 +97,7 @@ export { runNightlyIfStale, type NightlyRunResult } from "./nightlyScheduler.js"
 export { computePageRank, normalizeImportance, loadNoteImportance, runImportanceComputation } from "./importance.js";
 export { runLouvain, loadNoteClusters, runClusterComputation } from "./clustering.js";
 export { resolveSupersededBy, readSupersession } from "./relations.js";
-export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights } from "./query.js";
+export { getWeightedNeighbors, getEdgeWeight, computeLiveNeighborWeights, clearNoteTypeCache } from "./query.js";
 export { activate } from "./activation.js";
 export { runAblationComparison } from "./ablation.js";
 export { retrieveWithFallback, type RetrievalResult, type RetrieveWithFallbackOptions } from "./fallback.js";

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   AblationLayers,
@@ -20,6 +20,7 @@ import {
 import { decayWeight, resolveHalfLifeDays } from "./decay.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { loadNoteImportance } from "./importance.js";
+import { derived, loadCachedJson } from "./indexCache.js";
 import { primingBonus, type SessionBuffer } from "./priming.js";
 import { readSupersession } from "./relations.js";
 import { liveSeedBonus, loadSeedWeights, seedKey } from "./seedWeights.js";
@@ -38,25 +39,80 @@ const USAGE_FAST_DECAY_HALF_LIFE_DAYS = 0.5;
 // window above.
 const USAGE_ESTABLISHED_TOUCH_COUNT = 3;
 
+/**
+ * Frontmatter `type` per note file, keyed by absolute path and validated
+ * by mtime+size (VNL-030). Separate from indexCache's JSON cache because
+ * these are the user's own notes rather than nightly-built indexes: many
+ * more of them, changing far more often, and holding only a short string
+ * each rather than a parsed index.
+ */
+const noteTypeCache = new Map<string, { signature: string; noteType: string | undefined }>();
+
+/** Drops the per-note frontmatter-type cache. For tests, and for a process that has just rewritten many notes. */
+export function clearNoteTypeCache(): void {
+  noteTypeCache.clear();
+}
+
 export async function loadWeights(vaultDataDir: string): Promise<LinkWeightsFile | null> {
-  try {
-    const content = await readFile(join(vaultDataDir, "link-weights.json"), "utf8");
-    return JSON.parse(content) as LinkWeightsFile;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
+  return loadCachedJson<LinkWeightsFile>(join(vaultDataDir, "link-weights.json"));
+}
+
+/**
+ * `note -> [[neighbour, edge]]`, built once per loaded weights file
+ * (VNL-030). The edge keys are undirected sorted pairs, so finding one
+ * note's neighbours used to mean splitting and testing **every** key in
+ * the graph on every call — O(E) per note, paid again for each seed of
+ * each `recall`, and again at each hop of spreading activation. This makes
+ * it O(degree) after one O(E) pass that the cache then keeps for as long
+ * as the file is unchanged.
+ */
+function adjacencyOf(weights: LinkWeightsFile): Map<string, [string, EdgeRecord][]> {
+  return derived(weights, "adjacency", (file) => {
+    const adjacency = new Map<string, [string, EdgeRecord][]>();
+    for (const [key, record] of Object.entries(file.edges)) {
+      const [a, b] = key.split("|");
+      if (a === undefined || b === undefined) continue;
+      if (!adjacency.has(a)) adjacency.set(a, []);
+      adjacency.get(a)!.push([b, record]);
+      if (b === a) continue;
+      if (!adjacency.has(b)) adjacency.set(b, []);
+      adjacency.get(b)!.push([a, record]);
+    }
+    return adjacency;
+  });
 }
 
 
 async function readNoteType(vaultPath: string, notePath: string): Promise<string | undefined> {
+  // VNL-030: this is called once per candidate edge, and each call used to
+  // read and frontmatter-parse a whole note file just to learn its `type`.
+  // Cached against the note's own mtime+size, so a repeat is one stat().
+  // A note that cannot be read is cached as "unknown" too — the failure is
+  // as repeatable as the success, and re-reading a missing file per
+  // candidate is exactly the cost this removes.
+  const filePath = resolveNoteFile(vaultPath, notePath);
+  let signature: string;
   try {
-    const raw = await readFile(resolveNoteFile(vaultPath, notePath), "utf8");
-    const { frontmatter } = parseFrontmatter(raw);
-    return typeof frontmatter.type === "string" ? frontmatter.type : undefined;
+    const stats = await stat(filePath);
+    signature = `${stats.mtimeMs}:${stats.size}`;
   } catch {
     return undefined;
   }
+
+  const cached = noteTypeCache.get(filePath);
+  if (cached && cached.signature === signature) return cached.noteType;
+
+  let noteType: string | undefined;
+  try {
+    const raw = await readFile(filePath, "utf8");
+    const { frontmatter } = parseFrontmatter(raw);
+    noteType = typeof frontmatter.type === "string" ? frontmatter.type : undefined;
+  } catch {
+    noteType = undefined;
+  }
+
+  noteTypeCache.set(filePath, { signature, noteType });
+  return noteType;
 }
 
 function daysSince(iso: string, now: Date): number {
@@ -152,10 +208,7 @@ export async function computeLiveNeighborWeights(
   const candidates: Candidate[] = [];
 
   if (weights) {
-    for (const [key, record] of Object.entries(weights.edges)) {
-      const [a, b] = key.split("|");
-      const other = a === note ? b : b === note ? a : undefined;
-      if (other === undefined) continue;
+    for (const [other, record] of adjacencyOf(weights).get(note) ?? []) {
       const baseWeight = await liveWeight(vaultPath, other, record, now, undefined, layers);
       candidates.push({ path: other, baseWeight, lastTouched: record.lastTouched, source: "usage" });
       seen.add(other);

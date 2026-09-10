@@ -1,9 +1,10 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { StructuralLinksFile } from "./types.js";
 import { createObsidianAdapter, type SourceAdapter, type SourceNode } from "./adapters.js";
 import { createNoteResolver } from "./noteResolver.js";
+import { invalidateCachedFile, loadCachedJson } from "./indexCache.js";
 
 const STRUCTURAL_LINKS_FILE_VERSION = 1;
 const STRUCTURAL_LINKS_FILE_NAME = "structural-links.json";
@@ -79,13 +80,7 @@ export function buildDirectedAdjacency(nodes: SourceNode[], adapter: SourceAdapt
 }
 
 export async function loadStructuralIndex(vaultDataDir: string): Promise<StructuralLinksFile | null> {
-  try {
-    const content = await readFile(join(vaultDataDir, STRUCTURAL_LINKS_FILE_NAME), "utf8");
-    return JSON.parse(content) as StructuralLinksFile;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
+  return loadCachedJson<StructuralLinksFile>(join(vaultDataDir, STRUCTURAL_LINKS_FILE_NAME));
 }
 
 async function persistStructuralIndex(vaultDataDir: string, index: StructuralLinksFile): Promise<void> {
@@ -94,6 +89,7 @@ async function persistStructuralIndex(vaultDataDir: string, index: StructuralLin
   const tmpPath = join(vaultDataDir, `.${STRUCTURAL_LINKS_FILE_NAME}.${randomUUID()}.tmp`);
   await writeFile(tmpPath, JSON.stringify(index, null, 2), "utf8");
   await rename(tmpPath, targetPath);
+  invalidateCachedFile(targetPath);
 }
 
 /** Rebuilds the structural index from scratch and persists it atomically. */

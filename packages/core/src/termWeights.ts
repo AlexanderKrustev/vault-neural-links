@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { decayWeight } from "./decay.js";
 import { loadContentIndex } from "./contentIndex.js";
 import { tokenize } from "./tokenize.js";
 import type { EventLogEntry, TermTrigger, TermWeightsFile } from "./types.js";
+import { loadCachedJson } from "./indexCache.js";
 
 /**
  * VNL-053 — term-to-note learning.
@@ -105,13 +105,7 @@ export function termEvents(
 }
 
 export async function loadTermWeights(vaultDataDir: string): Promise<TermWeightsFile | null> {
-  try {
-    const content = await readFile(join(vaultDataDir, TERM_WEIGHTS_FILE_NAME), "utf8");
-    return JSON.parse(content) as TermWeightsFile;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
+  return loadCachedJson<TermWeightsFile>(join(vaultDataDir, TERM_WEIGHTS_FILE_NAME));
 }
 
 export interface TermScore {

@@ -1,9 +1,10 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { ContentIndexFile } from "./types.js";
 import { createObsidianAdapter, type SourceAdapter, type SourceNode } from "./adapters.js";
 import { tokenize } from "./tokenize.js";
+import { invalidateCachedFile, loadCachedJson } from "./indexCache.js";
 
 const CONTENT_INDEX_FILE_VERSION = 1;
 const CONTENT_INDEX_FILE_NAME = "content-index.json";
@@ -59,13 +60,7 @@ export async function buildContentIndex(
 }
 
 export async function loadContentIndex(vaultDataDir: string): Promise<ContentIndexFile | null> {
-  try {
-    const content = await readFile(join(vaultDataDir, CONTENT_INDEX_FILE_NAME), "utf8");
-    return JSON.parse(content) as ContentIndexFile;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
+  return loadCachedJson<ContentIndexFile>(join(vaultDataDir, CONTENT_INDEX_FILE_NAME));
 }
 
 async function persistContentIndex(vaultDataDir: string, index: ContentIndexFile): Promise<void> {
@@ -78,6 +73,7 @@ async function persistContentIndex(vaultDataDir: string, index: ContentIndexFile
   // hand-edits it, so the 2-4x size a `null, 2` indent adds is pure waste.
   await writeFile(tmpPath, JSON.stringify(index), "utf8");
   await rename(tmpPath, targetPath);
+  invalidateCachedFile(targetPath);
 }
 
 /** Rebuilds the content index from scratch and persists it atomically. */

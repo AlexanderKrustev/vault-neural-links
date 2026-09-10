@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, rename, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { ColdStartSeedConfig, SeedRecord, SeedWeightsFile } from "./types.js";
@@ -7,6 +7,7 @@ import { createObsidianAdapter, type SourceAdapter, type SourceNode } from "./ad
 import { decayWeight } from "./decay.js";
 import { toFilePath } from "./notes.js";
 import { buildDirectedAdjacency } from "./structuralLinks.js";
+import { invalidateCachedFile, loadCachedJson } from "./indexCache.js";
 
 const SEED_WEIGHTS_FILE_VERSION = 1;
 const SEED_WEIGHTS_FILE_NAME = "seed-weights.json";
@@ -124,13 +125,7 @@ async function statInBatches(
 }
 
 export async function loadSeedWeights(vaultDataDir: string): Promise<SeedWeightsFile | null> {
-  try {
-    const content = await readFile(join(vaultDataDir, SEED_WEIGHTS_FILE_NAME), "utf8");
-    return JSON.parse(content) as SeedWeightsFile;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
+  return loadCachedJson<SeedWeightsFile>(join(vaultDataDir, SEED_WEIGHTS_FILE_NAME));
 }
 
 async function persistSeedWeights(vaultDataDir: string, file: SeedWeightsFile): Promise<void> {
@@ -139,6 +134,7 @@ async function persistSeedWeights(vaultDataDir: string, file: SeedWeightsFile): 
   const tmpPath = join(vaultDataDir, `.${SEED_WEIGHTS_FILE_NAME}.${randomUUID()}.tmp`);
   await writeFile(tmpPath, JSON.stringify(file, null, 2), "utf8");
   await rename(tmpPath, targetPath);
+  invalidateCachedFile(targetPath);
 }
 
 /** Rebuilds the seed priors from scratch and persists them atomically. */
