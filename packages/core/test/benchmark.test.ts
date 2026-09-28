@@ -14,6 +14,7 @@ import {
   runBenchmark,
   type BenchmarkQuery,
 } from "../src/benchmark.js";
+import { metricsByType } from "../src/benchmark.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_VAULT = join(here, "fixtures", "benchmark-vault");
@@ -254,5 +255,22 @@ describe("VNL-020 benchmark", { timeout: 30_000 }, () => {
     for (const label of ["unprimed", "relatedPrimed", "targetPrimed", "lexicalOnly", "plainSearch", "MRR", "rank-1"]) {
       expect(text).toContain(label);
     }
+  });
+});
+
+// VNL-067: per-type metrics, so an axis that helps one kind of question and
+// hurts another is not averaged into "does nothing".
+describe("metricsByType", () => {
+  it("splits outcomes by question type and leaves untyped ones out", () => {
+    const buckets = metricsByType([
+      { query: "a", target: "A", type: "single-hop", rank: 1 },
+      { query: "b", target: "B", type: "single-hop", rank: 2 },
+      { query: "c", target: "C", type: "multi-hop", rank: null },
+      { query: "d", target: "D", rank: 1 },
+    ]);
+
+    expect(buckets["single-hop"]).toEqual({ queryCount: 2, mrr: 0.75, rank1: 1, found: 2 });
+    expect(buckets["multi-hop"]).toEqual({ queryCount: 1, mrr: 0, rank1: 0, found: 0 });
+    expect(Object.keys(buckets)).toHaveLength(2);
   });
 });

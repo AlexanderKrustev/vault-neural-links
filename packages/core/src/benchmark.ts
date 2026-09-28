@@ -44,6 +44,47 @@ export interface BenchmarkQuery {
   target: string;
   /** Optional human label for reporting. */
   label?: string;
+  /** What kind of question it is (VNL-067), so each axis is judged where it should matter. */
+  type?: QuestionType;
+}
+
+/**
+ * VNL-067. A flat query set lets each axis's wins and losses cancel into one
+ * number; these buckets are where each mechanism should, by construction,
+ * show up: multi-hop for the graph, vocabulary mismatch for embeddings,
+ * temporal for supersession and staleness.
+ *
+ * - `single-hop`: the answer is in one note, in words the query shares.
+ * - `multi-hop`: the query's words point at one note, the answer sits in a
+ *   note it links to.
+ * - `temporal`: what changed, what replaced what, what is current.
+ * - `vocabulary-mismatch`: the query shares no indexed word with its target.
+ */
+export type QuestionType = "single-hop" | "multi-hop" | "temporal" | "vocabulary-mismatch";
+export const QUESTION_TYPES: readonly QuestionType[] = ["single-hop", "multi-hop", "temporal", "vocabulary-mismatch"];
+/** Below this many queries a bucket's MRR is reported but flagged as too small to read. */
+export const MIN_BUCKET_SIZE = 10;
+
+export interface BucketMetrics {
+  queryCount: number;
+  mrr: number;
+  rank1: number;
+  found: number;
+}
+
+/** Per-type metrics for one condition's outcomes. Untyped queries are left out. */
+export function metricsByType(outcomes: readonly QueryOutcome[]): Partial<Record<QuestionType, BucketMetrics>> {
+  const buckets: Partial<Record<QuestionType, BucketMetrics>> = {};
+  for (const outcome of outcomes) {
+    if (!outcome.type) continue;
+    const bucket = (buckets[outcome.type] ??= { queryCount: 0, mrr: 0, rank1: 0, found: 0 });
+    bucket.queryCount++;
+    bucket.mrr += outcome.rank ? 1 / outcome.rank : 0;
+    if (outcome.rank === 1) bucket.rank1++;
+    if (outcome.rank !== null) bucket.found++;
+  }
+  for (const bucket of Object.values(buckets)) bucket.mrr /= bucket.queryCount;
+  return buckets;
 }
 
 export type BenchmarkCondition = "unprimed" | "relatedPrimed" | "targetPrimed";
@@ -57,6 +98,7 @@ export interface QueryOutcome {
   query: string;
   target: string;
   label?: string;
+  type?: QuestionType;
   /** 1-based rank of the target, or null if it never appeared in the top K. */
   rank: number | null;
   /**
@@ -217,6 +259,7 @@ export async function runBenchmark(
         query: entry.query,
         target: entry.target,
         label: entry.label,
+        type: entry.type,
         rank: rankOf(
           result.hits.map((hit) => hit.path),
           entry.target,
@@ -230,6 +273,7 @@ export async function runBenchmark(
       query: entry.query,
       target: entry.target,
       label: entry.label,
+        type: entry.type,
       rank: rankOf(
         hits.map((hit) => hit.path),
         entry.target,
@@ -253,6 +297,7 @@ export async function runBenchmark(
       query: entry.query,
       target: entry.target,
       label: entry.label,
+        type: entry.type,
       rank: rankOf(
         lexical.hits.map((hit) => hit.path),
         entry.target,
@@ -301,6 +346,26 @@ export function formatBenchmarkReport(report: BenchmarkReport): string {
         `${String(row.rank1).padStart(3)}/${row.queryCount}   ` +
         `${String(row.found).padStart(3)}/${row.queryCount}    ${meanRank}`,
     );
+  }
+
+  // VNL-067: the same two rows the gate compares, split by question type.
+  const engine = metricsByType(report.conditions.unprimed.outcomes);
+  const lexical = metricsByType(report.baselines.lexicalOnly.outcomes);
+  if (Object.keys(engine).length > 0) {
+    lines.push("", "by question type (cold)   n    engine MRR   BM25 MRR   difference", "-".repeat(66));
+    for (const type of QUESTION_TYPES) {
+      const e = engine[type];
+      const l = lexical[type];
+      if (!e || !l) {
+        lines.push(`${type.padEnd(24)}  0    — no queries of this type —`);
+        continue;
+      }
+      const diff = e.mrr - l.mrr;
+      lines.push(
+        `${type.padEnd(24)}${String(e.queryCount).padStart(3)}    ${e.mrr.toFixed(3)}        ${l.mrr.toFixed(3)}      ` +
+          `${diff >= 0 ? "+" : ""}${diff.toFixed(3)}${e.queryCount < MIN_BUCKET_SIZE ? "   (too few to read)" : ""}`,
+      );
+    }
   }
   return lines.join("\n");
 }

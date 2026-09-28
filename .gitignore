@@ -13,4 +13,5 @@ data/events/*.jsonl
 data/link-weights.json
 
 # gitignored: contains real vault paths from a private vault
-data/benchmark-queries.local.json
+data/*.local.json
+data/*.local.json.bak-*
