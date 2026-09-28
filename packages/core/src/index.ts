@@ -69,6 +69,14 @@ export {
   type OutcomeRoute,
 } from "./outcomeLearning.js";
 export {
+  EXPLORATORY_OUTCOME_WEIGHTS,
+  OUTCOME_GATE_MIN_CALLS,
+  PREREGISTERED_OUTCOME_WEIGHT,
+  replayOutcomes,
+  type ReplayReport,
+  type ReplayWindow,
+} from "./outcomeReplay.js";
+export {
   BENCHMARK_CONDITIONS,
   DEFAULT_BENCHMARK_TOP_K,
   formatBenchmarkReport,
