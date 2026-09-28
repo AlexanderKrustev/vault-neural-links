@@ -57,6 +57,18 @@ export { branchTokens, detectGitBranch } from "./gitBranch.js";
 export { createNoteResolver, type NoteResolver } from "./noteResolver.js";
 export { RECALL_LOG_DIR, computeReadThrough, recallLogFilePath, toRecallLogHits } from "./recallLog.js";
 export {
+  OUTCOME_HALF_LIFE_DAYS,
+  OUTCOME_MAX_SHIFT,
+  OUTCOME_PRIOR_STRENGTH,
+  foldOutcomes,
+  loadOutcomeModel,
+  outcomeRoutes,
+  outcomeShift,
+  readRecallLog,
+  type OutcomeModel,
+  type OutcomeRoute,
+} from "./outcomeLearning.js";
+export {
   BENCHMARK_CONDITIONS,
   DEFAULT_BENCHMARK_TOP_K,
   formatBenchmarkReport,

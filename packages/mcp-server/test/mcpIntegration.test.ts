@@ -323,6 +323,14 @@ describe("MCP client integration (VNL-007)", () => {
       expect(shown.hits!.map((hit) => hit.path)).toContain("Notes/Alpha");
     });
 
+    it("never shows the outcome shadow score to the model (VNL-073)", async () => {
+      const response = await client.callTool({ name: "recall", arguments: { query: "spreading activation write-up" } });
+      const text = (response.content as { type: string; text: string }[])[0].text;
+
+      expect(text).not.toContain("shadowOutcome");
+      expect(text).not.toContain("outcomeScore");
+    });
+
     it("does not credit a read of a note the recall never returned", async () => {
       await client.callTool({ name: "create_note", arguments: { path: "Notes/Unrelated", frontmatter: {}, body: "nothing alike" } });
       await client.callTool({ name: "recall", arguments: { query: "spreading activation write-up" } });

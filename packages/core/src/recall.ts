@@ -13,6 +13,7 @@ import {
 import { listNotes, readNotesInBatches, searchNotes, toFilePath, type NoteRef } from "./notes.js";
 import type { SessionBuffer } from "./priming.js";
 import { createNoteResolver } from "./noteResolver.js";
+import { loadOutcomeModel, outcomeShift, type OutcomeModel } from "./outcomeLearning.js";
 import { loadWeights } from "./query.js";
 import { readSupersession } from "./relations.js";
 import { liveTermScores } from "./termWeights.js";
@@ -288,6 +289,12 @@ export interface RecallOptions {
    */
   layers?: AblationLayers;
   onEvent?: ActivationEventSink;
+  /**
+   * The VNL-073 outcome model used for shadow scoring. Omitted, it is derived
+   * from `vaultDataDir`'s recall log; `false` skips it. It never changes the
+   * ranking either way.
+   */
+  outcome?: OutcomeModel | false;
   now?: Date;
 }
 
@@ -300,6 +307,12 @@ export interface RecallResult {
   candidatesScored: number;
   /** True if the graph phase hit its time budget and stopped early — hits may lack graph signal. */
   timedOut: boolean;
+  /**
+   * VNL-073 shadow score per hit path: log-odds shift of the routes that
+   * delivered it, from the vault's average open rate. Present only for hits
+   * with evidence. For the log only — callers must not show it to a model.
+   */
+  shadowOutcome?: Record<string, number>;
 }
 
 interface WeightedTerm {
@@ -697,6 +710,7 @@ export async function recall(
     activationConfig = DEFAULT_SPREADING_ACTIVATION_CONFIG,
     layers = HOT_PATH_ABLATION_LAYERS,
     onEvent,
+    outcome,
     now = new Date(),
   } = opts;
 
@@ -1028,11 +1042,28 @@ export async function recall(
     });
   }
 
+  // VNL-073, shadow mode: scored for the log, never for the ranking, and kept
+  // out of `why` so the model reading the results cannot act on it.
+  const outcomeModel = outcome === false ? null : (outcome ?? (await loadOutcomeModel(vaultDataDir, now).catch(() => null)));
+  let shadowOutcome: Record<string, number> | undefined;
+  if (outcomeModel) {
+    for (const hit of hits) {
+      const shift = outcomeShift(outcomeModel, {
+        path: hit.path,
+        via: hit.why.via,
+        matchedTerms: hit.why.matchedTerms,
+        learnedTerms: hit.why.learnedTerms,
+      });
+      if (shift !== undefined) (shadowOutcome ??= {})[hit.path] = shift;
+    }
+  }
+
   return {
     query,
     hits,
     seeds: seeds.map((seed) => seed.path),
     candidatesScored: candidates.length,
     timedOut,
+    ...(shadowOutcome && { shadowOutcome }),
   };
 }

@@ -789,6 +789,8 @@ export interface RecallLogHit {
   hops?: number;
   matchedTerms?: string[];
   learnedTerms?: string[];
+  /** VNL-073 shadow score (log-odds shift from the vault's open rate); absent when no route had evidence. */
+  outcomeScore?: number;
 }
 
 /**

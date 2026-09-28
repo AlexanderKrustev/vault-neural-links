@@ -40,7 +40,7 @@ export function recallLogFilePath(vaultDataDir: string, instanceId: string): str
  * (VNL-073(A)). Pure. Scores are rounded to 4 places: the log is kept 90
  * days and nothing downstream distinguishes finer than that.
  */
-export function toRecallLogHits(hits: readonly RecallHit[]): RecallLogHit[] {
+export function toRecallLogHits(hits: readonly RecallHit[], shadowOutcome?: Record<string, number>): RecallLogHit[] {
   const round = (n: number | undefined) => (n === undefined ? undefined : Math.round(n * 1e4) / 1e4);
   return hits.map((hit, index) => {
     const entry: RecallLogHit = {
@@ -57,6 +57,10 @@ export function toRecallLogHits(hits: readonly RecallHit[]): RecallLogHit[] {
     if (hit.why.hops !== undefined) entry.hops = hit.why.hops;
     if (hit.why.matchedTerms.length > 0) entry.matchedTerms = hit.why.matchedTerms;
     if (hit.why.learnedTerms && hit.why.learnedTerms.length > 0) entry.learnedTerms = hit.why.learnedTerms;
+    // VNL-073 shadow score: logged so VNL-074 can compare it with what was
+    // actually opened, and never shown to the model.
+    const outcome = shadowOutcome?.[hit.path];
+    if (outcome !== undefined) entry.outcomeScore = round(outcome);
     return entry;
   });
 }

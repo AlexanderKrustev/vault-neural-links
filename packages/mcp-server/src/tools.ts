@@ -224,7 +224,7 @@ export const recallTool = {
         resultCount: result.hits.length,
         // VNL-073(A): the list as shown, so a skip can be told from an
         // unseen result and the call can be replayed (VNL-074).
-        hits: toRecallLogHits(result.hits),
+        hits: toRecallLogHits(result.hits, result.shadowOutcome),
       });
       ctx.recentRecalls.unshift({
         id: recallId,
@@ -234,7 +234,11 @@ export const recallTool = {
       });
       ctx.recentRecalls.length = Math.min(ctx.recentRecalls.length, RECALL_ATTRIBUTION_WINDOW);
 
-      return textResult(result);
+      // VNL-073 shadow mode: the outcome score is logged above and never
+      // shown. A model that could see it might open high-scoring notes
+      // because of the score, and the experiment would measure itself.
+      const { shadowOutcome: _shadow, ...served } = result;
+      return textResult(served);
     },
 };
 
