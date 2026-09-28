@@ -9,6 +9,7 @@ import {
   buildEmbeddingIndex,
   cosine,
   decodeVector,
+  embeddingCoverage,
   embeddingHash,
   embeddingText,
   encodeVector,
@@ -332,5 +333,26 @@ describe("embeddings", () => {
     it("returns null when the optional package isn't installed, rather than throwing", async () => {
       expect(await loadTransformersProvider(undefined, "@vnl/definitely-not-installed")).toBeNull();
     });
+  });
+});
+
+// VNL-071: how much of the indexed vault the semantic index covers.
+describe("embeddingCoverage", () => {
+  const file: EmbeddingsFile = {
+    version: 1,
+    model: "m",
+    dim: 2,
+    builtAt: "2026-09-09T00:00:00.000Z",
+    notes: { A: { hash: "h", vector: "" }, B: { hash: "h", vector: "" } },
+  };
+
+  it("counts indexed notes that have no vector", () => {
+    const coverage = embeddingCoverage(file, ["A", "B", "C", "D"]);
+    expect(coverage).toMatchObject({ embedded: 2, indexedNotes: 4, missing: 2, missingSample: ["C", "D"] });
+  });
+
+  it("is null when either index is absent, rather than reporting everything missing", () => {
+    expect(embeddingCoverage(null, ["A"])).toBeNull();
+    expect(embeddingCoverage(file, null)).toBeNull();
   });
 });

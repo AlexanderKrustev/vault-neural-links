@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { computeUsageReport, resolveDataDir, type ReadThroughReport } from "@vault-neural-links/core";
+import {
+  RECALL_LOG_DIR,
+  computeUsageReport,
+  resolveDataDir,
+  type ReadThroughReport,
+  type RecallLogEntry,
+} from "@vault-neural-links/core";
 import { buildServerInstructions } from "../src/instructions.js";
 import { createMcpServer, SERVER_VERSION } from "../src/server.js";
 import { makeToolContext } from "../src/tools.js";
@@ -296,6 +302,25 @@ describe("MCP client integration (VNL-007)", () => {
       expect(readThrough.resultsRead).toBe(1);
       expect(readThrough.recallsWithAnyRead).toBe(1);
       expect(readThrough.recallsFollowedByWrite).toBe(1);
+    });
+
+    it("logs the result list in the order it was shown (VNL-073(A))", async () => {
+      await client.callTool({ name: "recall", arguments: { query: "spreading activation write-up" } });
+
+      const dir = join(resolveDataDir(vaultPath), RECALL_LOG_DIR);
+      const lines = (await Promise.all((await readdir(dir)).map((f) => readFile(join(dir, f), "utf8"))))
+        .join("\n")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as RecallLogEntry);
+      const shown = lines.find((entry) => entry.type === "returned");
+
+      expect(shown?.type).toBe("returned");
+      if (shown?.type !== "returned") return;
+      expect(shown.hits).toBeDefined();
+      expect(shown.hits!.length).toBe(shown.resultCount);
+      expect(shown.hits!.map((hit) => hit.rank)).toEqual(shown.hits!.map((_, i) => i + 1));
+      expect(shown.hits!.map((hit) => hit.path)).toContain("Notes/Alpha");
     });
 
     it("does not credit a read of a note the recall never returned", async () => {

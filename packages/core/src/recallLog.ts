@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import type { RecallLogEntry, ReadThroughReport } from "./types.js";
+import type { RecallHit } from "./recall.js";
+import type { RecallLogEntry, RecallLogHit, ReadThroughReport } from "./types.js";
 
 /**
  * VNL-057 — the number this project steers by in production.
@@ -31,6 +32,33 @@ export const RECALL_LOG_DIR = "recall";
 
 export function recallLogFilePath(vaultDataDir: string, instanceId: string): string {
   return join(vaultDataDir, RECALL_LOG_DIR, `${instanceId}.jsonl`);
+}
+
+
+/**
+ * The shown list, reduced to what outcome learning and replay need
+ * (VNL-073(A)). Pure. Scores are rounded to 4 places: the log is kept 90
+ * days and nothing downstream distinguishes finer than that.
+ */
+export function toRecallLogHits(hits: readonly RecallHit[]): RecallLogHit[] {
+  const round = (n: number | undefined) => (n === undefined ? undefined : Math.round(n * 1e4) / 1e4);
+  return hits.map((hit, index) => {
+    const entry: RecallLogHit = {
+      path: hit.path,
+      rank: index + 1,
+      source: hit.source,
+      score: round(hit.score) ?? 0,
+      lexicalScore: round(hit.why.lexicalScore) ?? 0,
+    };
+    if (hit.why.graphEnergy !== undefined) entry.graphEnergy = round(hit.why.graphEnergy);
+    if (hit.why.termScore !== undefined) entry.termScore = round(hit.why.termScore);
+    if (hit.why.semanticScore !== undefined) entry.semanticScore = round(hit.why.semanticScore);
+    if (hit.why.via !== undefined) entry.via = hit.why.via;
+    if (hit.why.hops !== undefined) entry.hops = hit.why.hops;
+    if (hit.why.matchedTerms.length > 0) entry.matchedTerms = hit.why.matchedTerms;
+    if (hit.why.learnedTerms && hit.why.learnedTerms.length > 0) entry.learnedTerms = hit.why.learnedTerms;
+    return entry;
+  });
 }
 
 /**

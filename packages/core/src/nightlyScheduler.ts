@@ -16,6 +16,8 @@ import { runClusterComputation } from "./clustering.js";
 import { pruneStaleInstanceFiles } from "./sessionFiles.js";
 import type { ActivationEventSink } from "./types.js";
 
+export type EmbeddingSkipReason = "disabled" | "not-enabled" | "too-many-notes" | "model-unavailable" | "failed";
+
 export interface NightlyRunResult {
   ran: boolean;
   edgeCount?: number;
@@ -32,6 +34,13 @@ export interface NightlyRunResult {
   reembeddedCount?: number;
   /** Model that produced them, so a mismatch is visible in the usage report. */
   embeddingModel?: string;
+  /**
+   * Why the semantic index was not refreshed this run (VNL-071). Absent when
+   * it was. `not-enabled` is the normal state of a vault that never opted
+   * in; `model-unavailable` means the optional model package could not be
+   * loaded in this process — the Obsidian plugin's case, always.
+   */
+  embeddingSkipped?: EmbeddingSkipReason;
   /** Stale per-instance session/socket files and expired logs removed (VNL-009). */
   prunedFileCount?: number;
   computedAt?: string;
@@ -143,18 +152,22 @@ async function runEmbeddingRefresh(
   nodes: Awaited<ReturnType<ReturnType<typeof createObsidianAdapter>["listNodes"]>>,
   options: NightlyEmbeddingOptions,
   now: Date,
-): Promise<Pick<NightlyRunResult, "embeddedNoteCount" | "reembeddedCount" | "embeddingModel">> {
-  if (options.enabled === false) return {};
+): Promise<EmbeddingRefreshResult> {
+  if (options.enabled === false) return { embeddingSkipped: "disabled" };
 
   const existing = await loadEmbeddings(vaultDataDir);
   // The default is "refresh what exists, never create" — see the tri-state
   // note on NightlyEmbeddingOptions.enabled.
-  if (!existing && options.enabled !== true) return {};
+  if (!existing && options.enabled !== true) return { embeddingSkipped: "not-enabled" };
 
-  if (nodes.length > (options.noteLimit ?? DEFAULT_EMBEDDING_NOTE_LIMIT)) return {};
+  if (nodes.length > (options.noteLimit ?? DEFAULT_EMBEDDING_NOTE_LIMIT)) return { embeddingSkipped: "too-many-notes" };
 
   const provider = options.provider ?? (await getSharedEmbeddingProvider());
-  if (!provider) return {};
+  // VNL-071: this is the branch the Obsidian plugin has been taking since
+  // 2026-09-09 — the optional peer cannot be imported from inside a bundled
+  // plugin — and it used to return nothing, so a frozen index looked exactly
+  // like an unchanged one. Now it says why.
+  if (!provider) return { embeddingSkipped: "model-unavailable" };
 
   try {
     const result = await rebuildEmbeddings(vaultDataDir, nodes, provider, { existing, now });
@@ -164,6 +177,36 @@ async function runEmbeddingRefresh(
       embeddingModel: result.model,
     };
   } catch {
-    return {};
+    return { embeddingSkipped: "failed" };
+  }
+}
+
+type EmbeddingRefreshResult = Pick<
+  NightlyRunResult,
+  "embeddedNoteCount" | "reembeddedCount" | "embeddingModel" | "embeddingSkipped"
+>;
+
+/**
+ * VNL-071: the embedding half of the nightly pipeline on its own, for a
+ * process that can actually load the model — the MCP server, which already
+ * loads it to embed queries. The plugin's nightly run cannot, so without
+ * this the semantic index (the axis the Phase 2b gate rests on) is only ever
+ * as fresh as the last time someone ran the CLI by hand.
+ *
+ * Incremental by content hash, so a run over an unchanged vault costs one
+ * read of every note and no model calls. Never throws: the caller is a
+ * background refresh that must not take a session down.
+ */
+export async function refreshEmbeddings(
+  vaultPath: string,
+  vaultDataDir: string,
+  options: NightlyEmbeddingOptions = {},
+  now: Date = new Date(),
+): Promise<EmbeddingRefreshResult> {
+  try {
+    const nodes = await createObsidianAdapter(vaultPath).listNodes();
+    return await runEmbeddingRefresh(vaultDataDir, nodes, options, now);
+  } catch {
+    return { embeddingSkipped: "failed" };
   }
 }

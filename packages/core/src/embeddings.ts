@@ -340,6 +340,40 @@ export async function loadEmbeddings(vaultDataDir: string): Promise<EmbeddingsFi
   }
 }
 
+
+/** How much of the indexed vault the semantic index actually covers (VNL-071). */
+export interface EmbeddingCoverage {
+  model: string;
+  builtAt: string;
+  embedded: number;
+  indexedNotes: number;
+  /** Indexed notes with no vector — invisible to semantic matching until the next refresh. */
+  missing: number;
+  missingSample: string[];
+}
+
+/**
+ * Compares the semantic index against the content index's note list. Pure
+ * over the two files, so it needs no vault path and no model. Null when
+ * either index is absent: a vault that never opted in has no coverage to
+ * report, and one with no content index has nothing to compare against.
+ */
+export function embeddingCoverage(
+  embeddings: EmbeddingsFile | null,
+  indexedPaths: readonly string[] | null,
+): EmbeddingCoverage | null {
+  if (!embeddings || !indexedPaths) return null;
+  const missing = indexedPaths.filter((path) => !(path in embeddings.notes));
+  return {
+    model: embeddings.model,
+    builtAt: embeddings.builtAt,
+    embedded: Object.keys(embeddings.notes).length,
+    indexedNotes: indexedPaths.length,
+    missing: missing.length,
+    missingSample: missing.slice(0, 5),
+  };
+}
+
 async function persistEmbeddings(vaultDataDir: string, index: EmbeddingsFile): Promise<void> {
   await mkdir(vaultDataDir, { recursive: true });
   const targetPath = join(vaultDataDir, EMBEDDINGS_FILE_NAME);

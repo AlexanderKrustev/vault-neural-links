@@ -3,9 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeNote } from "../src/notes.js";
-import { runNightlyIfStale } from "../src/nightlyScheduler.js";
+import { refreshEmbeddings, runNightlyIfStale } from "../src/nightlyScheduler.js";
 import { loadContentIndex } from "../src/contentIndex.js";
-import { loadEmbeddings, type EmbeddingProvider } from "../src/embeddings.js";
+import { loadEmbeddings, setSharedEmbeddingProvider, type EmbeddingProvider } from "../src/embeddings.js";
 import { loadStructuralIndex } from "../src/structuralLinks.js";
 
 describe("runNightlyIfStale", () => {
@@ -148,5 +148,76 @@ describe("runNightlyIfStale", () => {
       expect(result.contentIndexTokenCount).toBeGreaterThan(0);
       expect(await loadContentIndex(dataDir)).not.toBeNull();
     });
+  });
+});
+
+// VNL-071. The semantic index froze for three weeks because the plugin's
+// nightly run could not load the model and said nothing about it.
+describe("refreshEmbeddings (VNL-071)", () => {
+  let vaultPath: string;
+  let dataDir: string;
+  const fixed: EmbeddingProvider = {
+    model: "test-model",
+    dim: 2,
+    async embed(texts: string[]) {
+      return texts.map(() => Float32Array.from([1, 0]));
+    },
+  };
+
+  beforeEach(async () => {
+    vaultPath = await mkdtemp(join(tmpdir(), "vnl-test-refresh-vault-"));
+    dataDir = await mkdtemp(join(tmpdir(), "vnl-test-refresh-data-"));
+  });
+
+  afterEach(async () => {
+    setSharedEmbeddingProvider(undefined);
+    await rm(vaultPath, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it("embeds notes written since the last build, and only those", async () => {
+    await writeNote(vaultPath, "A", { frontmatter: {}, body: "text" });
+    await refreshEmbeddings(vaultPath, dataDir, { enabled: true, provider: fixed });
+    await writeNote(vaultPath, "B", { frontmatter: {}, body: "written later" });
+
+    // No `enabled`: an index that exists is refreshed without being asked.
+    const result = await refreshEmbeddings(vaultPath, dataDir, { provider: fixed });
+
+    expect(result.embeddingSkipped).toBeUndefined();
+    expect(result.embeddedNoteCount).toBe(2);
+    expect(result.reembeddedCount).toBe(1);
+    expect(Object.keys((await loadEmbeddings(dataDir))!.notes).sort()).toEqual(["A", "B"]);
+  });
+
+  it("says the model is unavailable instead of returning nothing", async () => {
+    await writeNote(vaultPath, "A", { frontmatter: {}, body: "text" });
+    await refreshEmbeddings(vaultPath, dataDir, { enabled: true, provider: fixed });
+    // The Obsidian plugin's situation: the optional package does not load.
+    setSharedEmbeddingProvider(null);
+
+    const result = await refreshEmbeddings(vaultPath, dataDir);
+
+    expect(result.embeddingSkipped).toBe("model-unavailable");
+    expect(result.embeddedNoteCount).toBeUndefined();
+  });
+
+  it("reports a vault that never opted in as not enabled, and creates nothing", async () => {
+    await writeNote(vaultPath, "A", { frontmatter: {}, body: "text" });
+
+    const result = await refreshEmbeddings(vaultPath, dataDir, { provider: fixed });
+
+    expect(result.embeddingSkipped).toBe("not-enabled");
+    expect(await loadEmbeddings(dataDir)).toBeNull();
+  });
+
+  it("carries the skip reason through the full nightly run", async () => {
+    await writeNote(vaultPath, "A", { frontmatter: {}, body: "text" });
+    await refreshEmbeddings(vaultPath, dataDir, { enabled: true, provider: fixed });
+    setSharedEmbeddingProvider(null);
+
+    const result = await runNightlyIfStale(vaultPath, dataDir);
+
+    expect(result.ran).toBe(true);
+    expect(result.embeddingSkipped).toBe("model-unavailable");
   });
 });

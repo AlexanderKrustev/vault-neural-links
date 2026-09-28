@@ -758,9 +758,38 @@ export type RecallLogEntry =
       recallId: string;
       query: string;
       resultCount: number;
+      /**
+       * VNL-073(A): the list as it was shown, in order. Absent on lines
+       * written before 2026-09-28. Without it a skipped result cannot be
+       * told from one that was never looked at, and no call can be
+       * replayed (VNL-074).
+       */
+      hits?: RecallLogHit[];
     }
   | { ts: string; instance: string; type: "read"; recallId: string; path: string }
   | { ts: string; instance: string; type: "write"; recallId: string; path: string };
+
+/**
+ * One shown result, as logged (VNL-073(A)). Carries what outcome learning
+ * needs to credit the link that *delivered* the result — `via` for a graph
+ * hit, the matched or learned terms otherwise — plus every axis' score, so
+ * VNL-074 can re-rank the shown list offline without re-running retrieval.
+ */
+export interface RecallLogHit {
+  path: string;
+  /** 1-based position in the list the caller saw. */
+  rank: number;
+  source: string;
+  score: number;
+  lexicalScore: number;
+  graphEnergy?: number;
+  termScore?: number;
+  semanticScore?: number;
+  via?: string;
+  hops?: number;
+  matchedTerms?: string[];
+  learnedTerms?: string[];
+}
 
 /**
  * The production usefulness metric (VNL-057) — what share of what `recall`
@@ -869,6 +898,8 @@ export interface UsageReport {
    * place of rank-1 against a pre-seeded target.
    */
   readThrough: ReadThroughReport;
+  /** Semantic-index coverage of the indexed vault (VNL-071); null when the vault has no semantic index. */
+  embeddings: import("./embeddings.js").EmbeddingCoverage | null;
   /** Known instrumentation or usage-pattern caveats surfaced alongside the numbers, e.g. mechanisms with no persisted trace. */
   gaps: string[];
 }

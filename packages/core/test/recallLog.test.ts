@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeReadThrough } from "../src/recallLog.js";
+import { computeReadThrough, toRecallLogHits } from "../src/recallLog.js";
+import type { RecallHit } from "../src/recall.js";
 import type { RecallLogEntry } from "../src/types.js";
 
 /**
@@ -112,5 +113,43 @@ describe("read-through (VNL-057)", () => {
 
     expect(report.firstRecallAt).toBe("2026-09-01T00:00:00.000Z");
     expect(report.lastRecallAt).toBe("2026-09-09T00:00:00.000Z");
+  });
+});
+
+describe("shown-list logging (VNL-073(A))", () => {
+  function hit(path: string, why: Partial<RecallHit["why"]>, source: RecallHit["source"] = "lexical"): RecallHit {
+    return { path, score: 0.123456789, source, snippet: "s", why: { matchedTerms: [], lexicalScore: 0, ...why } };
+  }
+
+  it("keeps the order shown as a 1-based rank, and what delivered each hit", () => {
+    const logged = toRecallLogHits([
+      hit("Notes/A", { matchedTerms: ["alpha"], lexicalScore: 2.5 }),
+      hit("Notes/B", { via: "Notes/A", hops: 1, graphEnergy: 0.4 }, "graph"),
+      hit("Notes/C", { learnedTerms: ["alpha"], termScore: 0.7 }, "term"),
+    ]);
+
+    expect(logged.map((h) => [h.path, h.rank])).toEqual([["Notes/A", 1], ["Notes/B", 2], ["Notes/C", 3]]);
+    // The link outcome learning credits: seed -> hit for a graph hit,
+    // query token -> hit otherwise.
+    expect(logged[1]).toMatchObject({ via: "Notes/A", hops: 1, source: "graph" });
+    expect(logged[0].matchedTerms).toEqual(["alpha"]);
+    expect(logged[2].learnedTerms).toEqual(["alpha"]);
+  });
+
+  it("rounds scores and leaves absent axes out rather than logging zeros", () => {
+    const [only] = toRecallLogHits([hit("Notes/A", { lexicalScore: 1.234567 })]);
+
+    expect(only.score).toBe(0.1235);
+    expect(only.lexicalScore).toBe(1.2346);
+    // Absent means "this axis did not reach the note", which a 0 would blur.
+    expect(only).not.toHaveProperty("semanticScore");
+    expect(only).not.toHaveProperty("via");
+    expect(only).not.toHaveProperty("matchedTerms");
+  });
+
+  it("still folds old lines that carry no hit list", () => {
+    const report = computeReadThrough([returned("r1", 3), read("r1", "Notes/A")]);
+    expect(report.recalls).toBe(1);
+    expect(report.resultsRead).toBe(1);
   });
 });

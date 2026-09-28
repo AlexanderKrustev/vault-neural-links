@@ -1,6 +1,8 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { loadNoteImportance } from "./importance.js";
+import { loadContentIndex } from "./contentIndex.js";
+import { embeddingCoverage, loadEmbeddings } from "./embeddings.js";
 import { RECALL_LOG_DIR, computeReadThrough } from "./recallLog.js";
 import type {
   EventLogEntry,
@@ -184,6 +186,18 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
       `read-through is computed over only ${readThrough.recalls} recall calls — too few to read as a trend.`,
     );
   }
+  // VNL-071: the semantic axis is the one the Phase 2b gate rests on, and it
+  // went stale for three weeks without anything saying so.
+  const [embeddingsFile, contentIndex] = await Promise.all([loadEmbeddings(vaultDataDir), loadContentIndex(vaultDataDir)]);
+  const embeddings = embeddingCoverage(embeddingsFile, contentIndex?.coveredPaths ?? null);
+  if (embeddings && embeddings.missing > 0) {
+    const ageDays = Math.floor((Date.now() - new Date(embeddings.builtAt).getTime()) / 86_400_000);
+    gaps.push(
+      `${embeddings.missing} of ${embeddings.indexedNotes} indexed notes have no embedding (semantic index last built ` +
+        `${ageDays} day(s) ago), so meaning-based matching cannot find them. The MCP server refreshes it in the ` +
+        "background when the optional model package is installed; the Obsidian plugin cannot load the model.",
+    );
+  }
   if (searchCount === 0 && (traverseCount > 0 || activateTierCounts.activation > 0)) {
     gaps.push(
       "No search_notes activity recorded — either search hasn't been used, or these sessions predate " +
@@ -231,6 +245,7 @@ export async function computeUsageReport(vaultDataDir: string, topN: number = DE
     topTouchedNotes,
     importanceOverlapPct,
     readThrough,
+    embeddings,
     gaps,
   };
 }

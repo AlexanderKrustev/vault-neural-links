@@ -55,7 +55,7 @@ export {
 } from "./briefing.js";
 export { branchTokens, detectGitBranch } from "./gitBranch.js";
 export { createNoteResolver, type NoteResolver } from "./noteResolver.js";
-export { RECALL_LOG_DIR, computeReadThrough, recallLogFilePath } from "./recallLog.js";
+export { RECALL_LOG_DIR, computeReadThrough, recallLogFilePath, toRecallLogHits } from "./recallLog.js";
 export {
   BENCHMARK_CONDITIONS,
   DEFAULT_BENCHMARK_TOP_K,
@@ -76,6 +76,7 @@ export {
   buildEmbeddingIndex,
   cosine,
   decodeVector,
+  embeddingCoverage,
   embeddingHash,
   embeddingText,
   encodeVector,
@@ -85,6 +86,7 @@ export {
   rebuildEmbeddings,
   semanticScores,
   setSharedEmbeddingProvider,
+  type EmbeddingCoverage,
   type EmbeddingProvider,
 } from "./embeddings.js";
 export { tokenize } from "./tokenize.js";
@@ -95,7 +97,13 @@ export {
   type SourceNode,
 } from "./adapters.js";
 export { consolidate, runNightlyConsolidation } from "./consolidation.js";
-export { runNightlyIfStale, type NightlyRunResult } from "./nightlyScheduler.js";
+export {
+  refreshEmbeddings,
+  runNightlyIfStale,
+  type EmbeddingSkipReason,
+  type NightlyEmbeddingOptions,
+  type NightlyRunResult,
+} from "./nightlyScheduler.js";
 export { computePageRank, normalizeImportance, loadNoteImportance, runImportanceComputation } from "./importance.js";
 export { runLouvain, loadNoteClusters, runClusterComputation } from "./clustering.js";
 export { resolveSupersededBy, readSupersession } from "./relations.js";

@@ -166,3 +166,28 @@ describe("computeUsageReport", () => {
     expect(report.mechanismCounts.reinforce).toEqual({ explicit: 1, autoRetrieval: 0, cited: 0 });
   });
 });
+
+// VNL-071: a frozen semantic index has to be visible where a user looks.
+describe("semantic index coverage", () => {
+  it("flags indexed notes that have no embedding", async () => {
+    await writeFile(
+      join(dataDir, "embeddings.json"),
+      JSON.stringify({ version: 1, model: "m", dim: 2, builtAt: "2026-09-09T00:00:00.000Z", notes: { A: { hash: "h", vector: "" } } }),
+    );
+    await writeFile(join(dataDir, "content-index.json"), JSON.stringify({ coveredPaths: ["A", "B", "C"], postings: {} }));
+
+    const report = await computeUsageReport(dataDir);
+
+    expect(report.embeddings).toMatchObject({ embedded: 1, indexedNotes: 3, missing: 2 });
+    expect(report.gaps.some((gap) => gap.startsWith("2 of 3 indexed notes have no embedding"))).toBe(true);
+  });
+
+  it("says nothing about a vault that never opted in", async () => {
+    await writeFile(join(dataDir, "content-index.json"), JSON.stringify({ coveredPaths: ["A"], postings: {} }));
+
+    const report = await computeUsageReport(dataDir);
+
+    expect(report.embeddings).toBeNull();
+    expect(report.gaps.some((gap) => gap.includes("embedding"))).toBe(false);
+  });
+});

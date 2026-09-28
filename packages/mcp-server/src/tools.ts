@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   appendRecallLog,
+  toRecallLogHits,
   appendUnderHeading,
   AUTO_REINFORCE_BOOST,
   CITED_REINFORCE_BOOST,
@@ -22,12 +23,15 @@ import {
   type VaultLinkClient,
 } from "@vault-neural-links/core";
 import type { ActivationSocketServer } from "./activationSocket.js";
+import type { EmbeddingRefresher } from "./embeddingRefresher.js";
 
 export interface ToolContext {
   vaultPath: string;
   vaultDataDir: string;
   client: VaultLinkClient;
   activationSocket?: ActivationSocketServer;
+  /** VNL-071: keeps the semantic index current; absent in tests that don't need it. */
+  embeddingRefresher?: EmbeddingRefresher;
   /**
    * Path of the last note read via read_note in this session, used to
    * auto-log traversal edges on the next read_note call. One MCP server
@@ -218,6 +222,9 @@ export const recallTool = {
         recallId,
         query,
         resultCount: result.hits.length,
+        // VNL-073(A): the list as shown, so a skip can be told from an
+        // unseen result and the call can be replayed (VNL-074).
+        hits: toRecallLogHits(result.hits),
       });
       ctx.recentRecalls.unshift({
         id: recallId,
@@ -552,6 +559,7 @@ export const createNoteTool = {
       }
       const result = await writeNoteWithAutoLink(ctx.vaultPath, path, frontmatter, body, "create");
       const cited = await creditCitations(ctx, path, body);
+      ctx.embeddingRefresher?.scheduleSoon();
       return textResult({ created: true, ...result, cited });
     },
 };
@@ -637,6 +645,7 @@ export const updateNoteTool = {
       // its `text`, a body replacement is the whole new body (whatever of the
       // old note the agent chose to carry over included).
       const cited = await creditCitations(ctx, path, appendOpts ? appendOpts.text : newBody);
+      ctx.embeddingRefresher?.scheduleSoon();
       return textResult({ updated: true, ...result, cited, frontmatterChanged: patchedKeys });
     },
 };

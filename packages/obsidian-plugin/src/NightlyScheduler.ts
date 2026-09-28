@@ -83,7 +83,12 @@ export class NightlyScheduler {
             `${result.clusterCount} clusters, at ${result.computedAt}` +
             (result.embeddedNoteCount === undefined
               ? ""
-              : `, ${result.embeddedNoteCount} embedded (${result.reembeddedCount} refreshed)`),
+              : `, ${result.embeddedNoteCount} embedded (${result.reembeddedCount} refreshed)`) +
+            // VNL-071: always "model-unavailable" inside Obsidian — the MCP
+            // server keeps the semantic index current instead.
+            (result.embeddingSkipped && result.embeddingSkipped !== "not-enabled"
+              ? `, semantic index left to the MCP server (${result.embeddingSkipped})`
+              : ""),
         );
       }
     } catch (err) {

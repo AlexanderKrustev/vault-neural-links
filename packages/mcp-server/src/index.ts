@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { removeInstanceFiles } from "@vault-neural-links/core";
 import { startActivationSocketServer } from "./activationSocket.js";
+import { EmbeddingRefresher } from "./embeddingRefresher.js";
 import { buildServerInstructions } from "./instructions.js";
 import { createMcpServer } from "./server.js";
 import { makeToolContext } from "./tools.js";
@@ -43,6 +44,12 @@ try {
 // longer triggered from here — Obsidian is now the sole scheduler (see
 // packages/obsidian-plugin/src/NightlyScheduler.ts, AIBRAIN-46). This
 // process still exposes compact_weights for on-demand ad-hoc compaction.
+//
+// VNL-071 carves out the one exception: the semantic index. Obsidian's run
+// cannot load the embedding model, this process already does (to embed
+// queries), so the refresh lives here — started after the transport
+// connects so it never delays `initialize`, and again after note writes.
+ctx.embeddingRefresher = new EmbeddingRefresher(vaultPath, ctx.vaultDataDir);
 
 // VNL-009: this instance's session buffer and socket registration describe
 // live state, so they are deleted when the process goes away — on either
@@ -53,6 +60,7 @@ let shuttingDown = false;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  ctx.embeddingRefresher?.close();
   await ctx.activationSocket?.close();
   await removeInstanceFiles(ctx.vaultDataDir, instanceId);
   process.exit(0);
@@ -73,3 +81,5 @@ process.stdin.on("end", () => {
 const server = createMcpServer(ctx, instructions);
 
 await server.connect(new StdioServerTransport());
+
+void ctx.embeddingRefresher.runNow();
